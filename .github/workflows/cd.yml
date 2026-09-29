@@ -1,0 +1,80 @@
+name: Continuous Delivery
+
+# Corre solo cuando CI terminó bien sobre un push a main o dev: nunca se publica una imagen que no pasó check.
+on:
+  workflow_run:
+    workflows: [ "Continuous Integration" ]
+    types: [ completed ]
+    branches: [ "main", "dev" ]
+
+env:
+  IMAGE: ghcr.io/ingsis-2026/snippet-service
+  SERVICE: snippet-service
+
+jobs:
+  image:
+    name: Build & Push Docker Image
+    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      environment: ${{ steps.target.outputs.environment }}
+
+    steps:
+      - name: Checkout the commit that passed CI
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      # main despliega a prod y dev a dev. La imagen se etiqueta con el entorno y con el commit.
+      - name: Resolve target environment
+        id: target
+        env:
+          BRANCH: ${{ github.event.workflow_run.head_branch }}
+          SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          if [ "$BRANCH" = "main" ]; then echo "environment=prod" >> "$GITHUB_OUTPUT"; else echo "environment=dev" >> "$GITHUB_OUTPUT"; fi
+          echo "short_sha=${SHA::8}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ env.IMAGE }}:${{ steps.target.outputs.environment }}
+            ${{ env.IMAGE }}:sha-${{ steps.target.outputs.short_sha }}
+
+  # Apagado hasta que existan las VMs: se prende con la variable de organización DEPLOY_ENABLED=true
+  # y los secretos SSH_HOST, SSH_USERNAME y SSH_KEY en los environments "dev" y "prod".
+  deploy:
+    name: Deploy to VM
+    needs: image
+    if: vars.DEPLOY_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    environment: ${{ needs.image.outputs.environment }}
+
+    steps:
+      - name: Pull and restart the service
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USERNAME }}
+          key: ${{ secrets.SSH_KEY }}
+          envs: SERVICE
+          script: |
+            cd ~/infra
+            docker compose pull "$SERVICE"
+            docker compose up -d "$SERVICE"
