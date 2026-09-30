@@ -9,21 +9,10 @@ spring:
     open-in-view: false
     hibernate:
       ddl-auto: ${DDL_AUTO:update}
-  data:
-    redis:
-      host: ${REDIS_HOST:localhost}
-      port: ${REDIS_PORT:6379}
-  security:
-    oauth2:
-      resourceserver:
-        jwt:
-          issuer-uri: ${AUTH0_ISSUER_URI:}
-          audiences: ${AUTH0_AUDIENCE:}
 
 services:
   permission-url: ${PERMISSION_URL:http://localhost:8081}
   language-url: ${LANGUAGE_URL:http://localhost:8082}
-  asset-url: ${ASSET_URL:http://localhost:8083}
 
 management:
   endpoints:

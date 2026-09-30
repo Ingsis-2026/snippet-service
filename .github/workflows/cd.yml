@@ -9,7 +9,6 @@ on:
 
 env:
   IMAGE: ghcr.io/ingsis-2026/snippet-service
-  SERVICE: snippet-service
 
 jobs:
   image:
@@ -19,8 +18,6 @@ jobs:
     permissions:
       contents: read
       packages: write
-    outputs:
-      environment: ${{ steps.target.outputs.environment }}
 
     steps:
       - name: Checkout the commit that passed CI
@@ -28,7 +25,7 @@ jobs:
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
 
-      # main despliega a prod y dev a dev. La imagen se etiqueta con el entorno y con el commit.
+      # Lo de main se etiqueta prod y lo de dev, dev; además, cada imagen lleva el commit.
       - name: Resolve target environment
         id: target
         env:
@@ -56,25 +53,3 @@ jobs:
           tags: |
             ${{ env.IMAGE }}:${{ steps.target.outputs.environment }}
             ${{ env.IMAGE }}:sha-${{ steps.target.outputs.short_sha }}
-
-  # Apagado hasta que existan las VMs: se prende con la variable de organización DEPLOY_ENABLED=true
-  # y los secretos SSH_HOST, SSH_USERNAME y SSH_KEY en los environments "dev" y "prod".
-  deploy:
-    name: Deploy to VM
-    needs: image
-    if: vars.DEPLOY_ENABLED == 'true'
-    runs-on: ubuntu-latest
-    environment: ${{ needs.image.outputs.environment }}
-
-    steps:
-      - name: Pull and restart the service
-        uses: appleboy/ssh-action@v1
-        with:
-          host: ${{ secrets.SSH_HOST }}
-          username: ${{ secrets.SSH_USERNAME }}
-          key: ${{ secrets.SSH_KEY }}
-          envs: SERVICE
-          script: |
-            cd ~/infra
-            docker compose pull "$SERVICE"
-            docker compose up -d "$SERVICE"
