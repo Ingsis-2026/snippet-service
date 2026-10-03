@@ -3,6 +3,7 @@ package com.ingsis.snippet
 import com.ingsis.snippet.clients.CodeError
 import com.ingsis.snippet.clients.LanguageClient
 import com.ingsis.snippet.clients.PermissionClient
+import com.ingsis.snippet.clients.Role
 import com.ingsis.snippet.clients.UnsupportedLanguageException
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
@@ -82,5 +83,32 @@ class ClientsTest {
         assertThrows<HttpServerErrorException> {
             PermissionClient(builder, "http://permission").grantOwner(UUID.randomUUID(), "auth0|ana")
         }
+    }
+
+    @Test
+    fun `permission-service devuelve el rol del usuario`() {
+        val snippetId = UUID.randomUUID()
+        server
+            .expect(requestTo("http://permission/permissions?snippetId=$snippetId&userId=auth0%7Cana"))
+            .andExpect(method(HttpMethod.GET))
+            .andRespond(
+                withSuccess(
+                    """{"snippetId": "$snippetId", "userId": "auth0|ana", "role": "OWNER"}""",
+                    MediaType.APPLICATION_JSON,
+                ),
+            )
+
+        assertEquals(Role.OWNER, PermissionClient(builder, "http://permission").roleOf(snippetId, "auth0|ana"))
+        server.verify()
+    }
+
+    @Test
+    fun `sin permiso, permission-service responde 404 y no hay rol`() {
+        val snippetId = UUID.randomUUID()
+        server
+            .expect(requestTo("http://permission/permissions?snippetId=$snippetId&userId=auth0%7Cbeto"))
+            .andRespond(withStatus(HttpStatus.NOT_FOUND))
+
+        assertEquals(null, PermissionClient(builder, "http://permission").roleOf(snippetId, "auth0|beto"))
     }
 }
