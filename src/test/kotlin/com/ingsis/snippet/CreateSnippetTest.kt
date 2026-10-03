@@ -15,11 +15,13 @@ import org.mockito.Mockito.verifyNoInteractions
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc
+import org.springframework.http.MediaType
 import org.springframework.mock.web.MockMultipartFile
 import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.context.bean.override.mockito.MockitoBean
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.multipart
+import org.springframework.test.web.servlet.post
 import org.springframework.web.client.ResourceAccessException
 import java.util.UUID
 import kotlin.test.assertEquals
@@ -139,6 +141,53 @@ class CreateSnippetTest(
             status { isBadRequest() }
             jsonPath("$.detail") { value("El archivo está vacío") }
         }
+        verifyNoInteractions(languageClient)
+    }
+
+    // US3: el mismo alta, con el código escrito en el editor.
+
+    private fun createFromEditor(
+        content: String = code,
+        name: String = "Saludo",
+    ) = mockMvc.post("/snippets") {
+        header(USER_HEADER, "auth0|ana")
+        contentType = MediaType.APPLICATION_JSON
+        this.content =
+            """{"name": "$name", "description": "Desde el editor", "language": "printscript", "version": "1.0",
+               "content": ${quote(content)}}"""
+    }
+
+    @Test
+    fun `un snippet escrito en el editor se guarda con su owner`() {
+        createFromEditor().andExpect {
+            status { isCreated() }
+            jsonPath("$.content") { value(code) }
+            jsonPath("$.description") { value("Desde el editor") }
+            jsonPath("$.ownerId") { value("auth0|ana") }
+        }
+
+        val saved = repository.findAll().single()
+        assertEquals(code, saved.content)
+        verify(permissionClient).grantOwner(saved.id!!, "auth0|ana")
+    }
+
+    @Test
+    fun `un snippet invalido escrito en el editor no se guarda`() {
+        Mockito
+            .`when`(languageClient.validate(code, "printscript", "1.0"))
+            .thenReturn(listOf(CodeError("Can't handle this sentence", 1, 1)))
+
+        createFromEditor().andExpect {
+            status { isUnprocessableContent() }
+            jsonPath("$.errors[0].rule") { value("Can't handle this sentence") }
+        }
+        assertEquals(0, repository.count())
+    }
+
+    @Test
+    fun `un snippet del editor sin codigo o sin nombre es un 400`() {
+        createFromEditor(content = " ").andExpect { status { isBadRequest() } }
+        createFromEditor(name = "").andExpect { status { isBadRequest() } }
         verifyNoInteractions(languageClient)
     }
 }
