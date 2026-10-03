@@ -3,6 +3,7 @@ package com.ingsis.snippet
 import com.ingsis.snippet.clients.UnsupportedLanguageException
 import com.ingsis.snippet.snippets.EmptyFileException
 import com.ingsis.snippet.snippets.InvalidSnippetException
+import com.ingsis.snippet.snippets.NoAccessException
 import com.ingsis.snippet.snippets.NotOwnerException
 import com.ingsis.snippet.snippets.SnippetNotFoundException
 import org.springframework.http.HttpStatus
@@ -26,8 +27,8 @@ class ErrorHandler {
     @ExceptionHandler(SnippetNotFoundException::class)
     fun notFound(e: SnippetNotFoundException): ProblemDetail = ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, e.message)
 
-    @ExceptionHandler(NotOwnerException::class)
-    fun notOwner(e: NotOwnerException): ProblemDetail = ProblemDetail.forStatusAndDetail(HttpStatus.FORBIDDEN, e.message)
+    @ExceptionHandler(NotOwnerException::class, NoAccessException::class)
+    fun forbidden(e: RuntimeException): ProblemDetail = ProblemDetail.forStatusAndDetail(HttpStatus.FORBIDDEN, e.message)
 
     /** Otro servicio no respondió o respondió con un error que no esperábamos. */
     @ExceptionHandler(RestClientException::class)

@@ -3,8 +3,6 @@ package com.ingsis.snippet.snippets
 import com.ingsis.snippet.clients.CodeError
 import com.ingsis.snippet.clients.LanguageClient
 import com.ingsis.snippet.clients.PermissionClient
-import com.ingsis.snippet.clients.Role
-import org.springframework.data.repository.findByIdOrNull
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import java.util.UUID
@@ -23,6 +21,7 @@ class SnippetService(
     private val repository: SnippetRepository,
     private val languageClient: LanguageClient,
     private val permissionClient: PermissionClient,
+    private val access: SnippetAccess,
 ) {
     /**
      * Solo se guarda un snippet que su parser acepta (US1, US3). El owner se registra en
@@ -55,8 +54,7 @@ class SnippetService(
         userId: String,
         data: SnippetData,
     ): Snippet {
-        val snippet = repository.findByIdOrNull(id) ?: throw SnippetNotFoundException(id)
-        if (permissionClient.roleOf(id, userId) != Role.OWNER) throw NotOwnerException()
+        val snippet = access.requireOwner(id, userId)
         validate(data)
         snippet.apply {
             name = data.name
@@ -78,9 +76,3 @@ class SnippetService(
 class InvalidSnippetException(
     val errors: List<CodeError>,
 ) : RuntimeException("El snippet no es válido")
-
-class SnippetNotFoundException(
-    id: UUID,
-) : RuntimeException("No existe el snippet $id")
-
-class NotOwnerException : RuntimeException("Solo el owner puede modificar el snippet")
