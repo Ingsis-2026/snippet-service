@@ -35,6 +35,14 @@ class TestCaseController(
         @Valid @RequestBody request: TestCaseRequest,
     ): TestCaseResponse = service.create(snippetId, userId, request.toData())
 
+    /** US6: correr un test y ver si pasa. */
+    @PostMapping("/snippets/{snippetId}/tests/{testId}/run")
+    fun run(
+        @PathVariable snippetId: UUID,
+        @PathVariable testId: UUID,
+        @RequestHeader(USER_HEADER) @NotBlank userId: String,
+    ): TestRunResponse = service.run(snippetId, testId, userId)
+
     @GetMapping("/snippets/{snippetId}/tests")
     fun list(
         @PathVariable snippetId: UUID,
