@@ -9,6 +9,7 @@ on:
 
 env:
   IMAGE: ghcr.io/ingsis-2026/snippet-service
+  SERVICE: snippet-service
 
 jobs:
   image:
@@ -18,6 +19,9 @@ jobs:
     permissions:
       contents: read
       packages: write
+    outputs:
+      environment: ${{ steps.target.outputs.environment }}
+      short_sha: ${{ steps.target.outputs.short_sha }}
 
     steps:
       - name: Checkout the commit that passed CI
@@ -53,3 +57,25 @@ jobs:
           tags: |
             ${{ env.IMAGE }}:${{ steps.target.outputs.environment }}
             ${{ env.IMAGE }}:sha-${{ steps.target.outputs.short_sha }}
+
+  # Actualiza solo este servicio en el stack "snippet" de la VM del entorno, con la imagen de este commit.
+  # Apagado hasta que existan las VMs: se prende con la variable DEPLOY_ENABLED=true
+  # y los secretos SSH_HOST, SSH_USERNAME y SSH_KEY en los environments "dev" y "prod".
+  deploy:
+    name: Deploy to VM
+    needs: image
+    if: vars.DEPLOY_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    environment: ${{ needs.image.outputs.environment }}
+
+    steps:
+      - name: Update the service in the Swarm stack
+        uses: appleboy/ssh-action@v1
+        env:
+          TAG: sha-${{ needs.image.outputs.short_sha }}
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USERNAME }}
+          key: ${{ secrets.SSH_KEY }}
+          envs: IMAGE,SERVICE,TAG
+          script: docker service update --with-registry-auth --image "$IMAGE:$TAG" "snippet_$SERVICE"
