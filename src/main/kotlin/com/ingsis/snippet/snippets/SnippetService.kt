@@ -3,6 +3,8 @@ package com.ingsis.snippet.snippets
 import com.ingsis.snippet.clients.CodeError
 import com.ingsis.snippet.clients.LanguageClient
 import com.ingsis.snippet.clients.PermissionClient
+import com.ingsis.snippet.rules.RuleService
+import com.ingsis.snippet.rules.RuleType
 import org.springframework.data.domain.Page
 import org.springframework.data.domain.Pageable
 import org.springframework.stereotype.Service
@@ -24,6 +26,7 @@ class SnippetService(
     private val languageClient: LanguageClient,
     private val permissionClient: PermissionClient,
     private val access: SnippetAccess,
+    private val ruleService: RuleService,
 ) {
     /**
      * Solo se guarda un snippet que su parser acepta (US1, US3). El owner se registra en
@@ -65,6 +68,20 @@ class SnippetService(
         val ids = permissionClient.snippetsOf(userId, filter.relation.role)
         if (ids.isEmpty()) return Page.empty(pageable)
         return repository.findAll(filter.among(ids), pageable)
+    }
+
+    /**
+     * US14: las reglas de lint que el snippet no cumple. Son las de su owner, porque las elige
+     * quien administra el snippet, y las ve cualquiera que pueda ver el snippet (US6).
+     */
+    @Transactional(readOnly = true)
+    fun lint(
+        id: UUID,
+        userId: String,
+    ): List<CodeError> {
+        val snippet = access.requireReader(id, userId)
+        val rules = ruleService.configOf(snippet.ownerId, RuleType.LINTING)
+        return languageClient.lint(snippet.content, snippet.language, snippet.version, rules)
     }
 
     /**

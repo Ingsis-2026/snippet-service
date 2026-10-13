@@ -33,6 +33,13 @@ internal data class RunRequest(
     val inputs: List<String>,
 )
 
+internal data class LintRequest(
+    val code: String,
+    val language: String,
+    val version: String,
+    val rules: Map<String, Any>,
+)
+
 /** Lo que imprimió el código, en orden, y el error que cortó la ejecución si lo hubo. */
 data class RunOutcome(
     val outputs: List<String>,
@@ -60,6 +67,14 @@ class LanguageClient(
         version: String,
         inputs: List<String>,
     ): RunOutcome = post<RunOutcome>("/run", RunRequest(code, language, version, inputs))
+
+    /** Las reglas de lint de [rules] que el código no cumple; vacío si las cumple todas. */
+    fun lint(
+        code: String,
+        language: String,
+        version: String,
+        rules: Map<String, Any>,
+    ): List<CodeError> = post<ValidationResult>("/lint", LintRequest(code, language, version, rules)).errors
 
     private inline fun <reified T : Any> post(
         path: String,
