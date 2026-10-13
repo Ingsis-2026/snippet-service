@@ -5,8 +5,11 @@ import jakarta.validation.Valid
 import jakarta.validation.constraints.NotBlank
 import org.springframework.data.domain.Pageable
 import org.springframework.data.web.PageableDefault
+import org.springframework.http.ContentDisposition
+import org.springframework.http.HttpHeaders
 import org.springframework.http.HttpStatus
 import org.springframework.http.MediaType
+import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
@@ -150,6 +153,27 @@ class SnippetController(
     ): LintResponse {
         val errors = service.lint(id, userId)
         return LintResponse(valid = errors.isEmpty(), errors = errors)
+    }
+
+    /** US13: descargar un snippet, en su versión original o formateada (`formatted=true`). */
+    @GetMapping("/snippets/{id}/download")
+    fun download(
+        @PathVariable id: UUID,
+        @RequestHeader(USER_HEADER) @NotBlank userId: String,
+        @RequestParam(defaultValue = "false") formatted: Boolean,
+    ): ResponseEntity<String> {
+        val file = service.download(id, userId, formatted)
+        return ResponseEntity
+            .ok()
+            .contentType(MediaType("text", "plain", Charsets.UTF_8))
+            .header(
+                HttpHeaders.CONTENT_DISPOSITION,
+                ContentDisposition
+                    .attachment()
+                    .filename(file.filename, Charsets.UTF_8)
+                    .build()
+                    .toString(),
+            ).body(file.content)
     }
 
     /** US7: compartir un snippet propio con otro usuario. */

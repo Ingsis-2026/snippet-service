@@ -33,11 +33,16 @@ internal data class RunRequest(
     val inputs: List<String>,
 )
 
-internal data class LintRequest(
+/** Lo que piden `/format` y `/lint`: el código y las reglas activas, por su nombre en el lenguaje. */
+internal data class RulesRequest(
     val code: String,
     val language: String,
     val version: String,
     val rules: Map<String, Any>,
+)
+
+internal data class FormatResult(
+    val content: String,
 )
 
 /** Lo que imprimió el código, en orden, y el error que cortó la ejecución si lo hubo. */
@@ -74,7 +79,15 @@ class LanguageClient(
         language: String,
         version: String,
         rules: Map<String, Any>,
-    ): List<CodeError> = post<ValidationResult>("/lint", LintRequest(code, language, version, rules)).errors
+    ): List<CodeError> = post<ValidationResult>("/lint", RulesRequest(code, language, version, rules)).errors
+
+    /** El código con las reglas de formato de [rules] aplicadas. */
+    fun format(
+        code: String,
+        language: String,
+        version: String,
+        rules: Map<String, Any>,
+    ): String = post<FormatResult>("/format", RulesRequest(code, language, version, rules)).content
 
     private inline fun <reified T : Any> post(
         path: String,

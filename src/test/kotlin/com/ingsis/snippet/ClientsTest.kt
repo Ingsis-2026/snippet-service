@@ -190,6 +190,21 @@ class ClientsTest {
     }
 
     @Test
+    fun `language-service formatea el codigo con las reglas`() {
+        server
+            .expect(requestTo("http://language/format"))
+            .andExpect(method(HttpMethod.POST))
+            .andExpect(
+                content().json("""{"code": "x=1", "language": "printscript", "version": "1.0", "rules": {"indent-inside-if": 2}}"""),
+            ).andRespond(withSuccess("""{"content": "x = 1"}""", MediaType.APPLICATION_JSON))
+
+        val formatted = LanguageClient(builder, "http://language").format("x=1", "printscript", "1.0", mapOf("indent-inside-if" to 2))
+
+        assertEquals("x = 1", formatted)
+        server.verify()
+    }
+
+    @Test
     fun `language-service ejecuta el codigo con los inputs`() {
         server
             .expect(requestTo("http://language/run"))
