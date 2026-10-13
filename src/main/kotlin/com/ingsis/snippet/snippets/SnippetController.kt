@@ -44,6 +44,14 @@ data class SnippetResponse(
     val status: ValidityStatus,
 )
 
+/**
+ * Con quién se comparte. Elegirlo de un listado que se filtra mientras se escribe (US7) necesita
+ * los usuarios de Auth0; hasta entonces llega el id tal cual.
+ */
+data class ShareRequest(
+    @field:NotBlank val userId: String,
+)
+
 fun Snippet.toResponse() = SnippetResponse(id!!, name, description, language, version, content, ownerId, status)
 
 /**
@@ -100,6 +108,14 @@ class SnippetController(
         @RequestHeader(USER_HEADER) @NotBlank userId: String,
         @Valid @RequestBody request: SnippetRequest,
     ): SnippetResponse = service.update(id, userId, request.toData()).toResponse()
+
+    /** US7: compartir un snippet propio con otro usuario. */
+    @PostMapping("/snippets/{id}/share")
+    fun share(
+        @PathVariable id: UUID,
+        @RequestHeader(USER_HEADER) @NotBlank userId: String,
+        @Valid @RequestBody request: ShareRequest,
+    ): SnippetResponse = service.share(id, userId, request.userId).toResponse()
 
     private fun MultipartFile.text(): String {
         if (isEmpty) throw EmptyFileException()

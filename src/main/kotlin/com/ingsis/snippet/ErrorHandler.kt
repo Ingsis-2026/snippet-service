@@ -1,5 +1,6 @@
 package com.ingsis.snippet
 
+import com.ingsis.snippet.clients.AlreadyHasAccessException
 import com.ingsis.snippet.clients.UnsupportedLanguageException
 import com.ingsis.snippet.snippets.EmptyFileException
 import com.ingsis.snippet.snippets.InvalidSnippetException
@@ -30,6 +31,9 @@ class ErrorHandler {
 
     @ExceptionHandler(NotOwnerException::class, NoAccessException::class)
     fun forbidden(e: RuntimeException): ProblemDetail = ProblemDetail.forStatusAndDetail(HttpStatus.FORBIDDEN, e.message)
+
+    @ExceptionHandler(AlreadyHasAccessException::class)
+    fun conflict(e: RuntimeException): ProblemDetail = ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, e.message)
 
     /** Otro servicio no respondió o respondió con un error que no esperábamos. */
     @ExceptionHandler(RestClientException::class)

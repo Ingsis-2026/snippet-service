@@ -1,5 +1,6 @@
 package com.ingsis.snippet
 
+import com.ingsis.snippet.clients.AlreadyHasAccessException
 import com.ingsis.snippet.clients.CodeError
 import com.ingsis.snippet.clients.LanguageClient
 import com.ingsis.snippet.clients.PermissionClient
@@ -75,6 +76,29 @@ class ClientsTest {
         PermissionClient(builder, "http://permission").grantOwner(snippetId, "auth0|ana")
 
         server.verify()
+    }
+
+    @Test
+    fun `permission-service registra un permiso de lectura`() {
+        val snippetId = UUID.randomUUID()
+        server
+            .expect(requestTo("http://permission/permissions"))
+            .andExpect(method(HttpMethod.POST))
+            .andExpect(content().json("""{"snippetId": "$snippetId", "userId": "auth0|beto", "role": "READ"}"""))
+            .andRespond(withStatus(HttpStatus.CREATED))
+
+        PermissionClient(builder, "http://permission").grantRead(snippetId, "auth0|beto")
+
+        server.verify()
+    }
+
+    @Test
+    fun `un 409 de permission-service es que el usuario ya tiene acceso`() {
+        server.expect(requestTo("http://permission/permissions")).andRespond(withStatus(HttpStatus.CONFLICT))
+
+        assertThrows<AlreadyHasAccessException> {
+            PermissionClient(builder, "http://permission").grantRead(UUID.randomUUID(), "auth0|beto")
+        }
     }
 
     @Test
