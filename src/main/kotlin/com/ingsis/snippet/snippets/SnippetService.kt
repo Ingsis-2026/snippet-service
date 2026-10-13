@@ -5,6 +5,7 @@ import com.ingsis.snippet.clients.LanguageClient
 import com.ingsis.snippet.clients.PermissionClient
 import com.ingsis.snippet.rules.RuleService
 import com.ingsis.snippet.rules.RuleType
+import org.springframework.context.ApplicationEventPublisher
 import org.springframework.data.domain.Page
 import org.springframework.data.domain.Pageable
 import org.springframework.stereotype.Service
@@ -20,6 +21,11 @@ data class SnippetData(
     val content: String,
 )
 
+/** Se actualizó un snippet. Se publica dentro del update y se atiende cuando quedó guardado (US16). */
+data class SnippetUpdatedEvent(
+    val snippet: Snippet,
+)
+
 data class SnippetFile(
     val filename: String,
     val content: String,
@@ -32,6 +38,7 @@ class SnippetService(
     private val permissionClient: PermissionClient,
     private val access: SnippetAccess,
     private val ruleService: RuleService,
+    private val events: ApplicationEventPublisher,
 ) {
     /**
      * Solo se guarda un snippet que su parser acepta (US1, US3). El owner se registra en
@@ -133,7 +140,8 @@ class SnippetService(
      * Reemplaza todos los datos del snippet (US2, US4). Solo puede hacerlo su owner, y el
      * resultado tiene que cumplir las reglas del lenguaje, que puede haber cambiado.
      *
-     * El estado vuelve a `PENDING`: el contenido nuevo todavía no se linteó.
+     * El estado vuelve a `PENDING`: el contenido nuevo todavía no se linteó. Una vez guardado, se
+     * corren todos sus tests (US16).
      */
     @Transactional
     fun update(
@@ -151,7 +159,9 @@ class SnippetService(
             content = data.content
             status = ValidityStatus.PENDING
         }
-        return repository.save(snippet)
+        val saved = repository.save(snippet)
+        events.publishEvent(SnippetUpdatedEvent(saved))
+        return saved
     }
 
     private fun validate(data: SnippetData) {

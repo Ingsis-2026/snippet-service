@@ -5,6 +5,8 @@ import jakarta.persistence.CollectionTable
 import jakarta.persistence.Column
 import jakarta.persistence.ElementCollection
 import jakarta.persistence.Entity
+import jakarta.persistence.EnumType
+import jakarta.persistence.Enumerated
 import jakarta.persistence.FetchType
 import jakarta.persistence.GeneratedValue
 import jakarta.persistence.GenerationType
@@ -12,8 +14,12 @@ import jakarta.persistence.Id
 import jakarta.persistence.JoinColumn
 import jakarta.persistence.ManyToOne
 import jakarta.persistence.OrderColumn
+import org.hibernate.annotations.ColumnDefault
 import org.springframework.data.jpa.repository.JpaRepository
 import java.util.UUID
+
+/** Cómo le fue a un test la última vez que se corrió (US16). `PENDING` si todavía no se corrió. */
+enum class TestStatus { PENDING, PASSED, FAILED }
 
 /**
  * Un test de un snippet (US8): los inputs que se le dan y los outputs que se esperan.
@@ -39,6 +45,11 @@ class TestCase(
     @OrderColumn(name = "position")
     @Column(name = "content", nullable = false, columnDefinition = "text")
     var outputs: MutableList<String>,
+    // El default en la base es para que agregar la columna no falle sobre tests que ya existían.
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false)
+    @ColumnDefault("'PENDING'")
+    var status: TestStatus = TestStatus.PENDING,
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
     val id: UUID? = null,
@@ -46,6 +57,8 @@ class TestCase(
 
 interface TestCaseRepository : JpaRepository<TestCase, UUID> {
     fun findAllBySnippetIdOrderByName(snippetId: UUID): List<TestCase>
+
+    fun findAllBySnippetId(snippetId: UUID): List<TestCase>
 
     fun findByIdAndSnippetId(
         id: UUID,
