@@ -3,6 +3,8 @@ package com.ingsis.snippet.snippets
 import com.ingsis.snippet.clients.CodeError
 import com.ingsis.snippet.clients.LanguageClient
 import com.ingsis.snippet.clients.PermissionClient
+import org.springframework.data.domain.Page
+import org.springframework.data.domain.Pageable
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import java.util.UUID
@@ -48,6 +50,22 @@ class SnippetService(
         id: UUID,
         userId: String,
     ): Snippet = access.requireReader(id, userId)
+
+    /**
+     * US5: los snippets que el usuario puede ver. Cuáles son lo decide permission-service; el
+     * filtro, el orden y la página se resuelven en la base, sobre esos ids.
+     */
+    @Transactional(readOnly = true)
+    fun list(
+        userId: String,
+        filter: SnippetFilter,
+        pageable: Pageable,
+    ): Page<Snippet> {
+        SnippetFilter.requireSortable(pageable.sort)
+        val ids = permissionClient.snippetsOf(userId, filter.relation.role)
+        if (ids.isEmpty()) return Page.empty(pageable)
+        return repository.findAll(filter.among(ids), pageable)
+    }
 
     /**
      * US7: solo el owner comparte, y quien lo recibe queda con permiso de lectura sobre el

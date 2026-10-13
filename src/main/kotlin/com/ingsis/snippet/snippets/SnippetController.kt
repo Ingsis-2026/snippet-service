@@ -2,6 +2,8 @@ package com.ingsis.snippet.snippets
 
 import jakarta.validation.Valid
 import jakarta.validation.constraints.NotBlank
+import org.springframework.data.domain.Pageable
+import org.springframework.data.web.PageableDefault
 import org.springframework.http.HttpStatus
 import org.springframework.http.MediaType
 import org.springframework.web.bind.annotation.GetMapping
@@ -52,6 +54,14 @@ data class ShareRequest(
     @field:NotBlank val userId: String,
 )
 
+/** Una página de la lista de snippets (US5). [page] arranca en 0 y [total] es la cantidad de snippets en todas las páginas. */
+data class SnippetPage(
+    val content: List<SnippetResponse>,
+    val page: Int,
+    val size: Int,
+    val total: Long,
+)
+
 fun Snippet.toResponse() = SnippetResponse(id!!, name, description, language, version, content, ownerId, status)
 
 /**
@@ -81,6 +91,23 @@ class SnippetController(
         @RequestHeader(USER_HEADER) @NotBlank userId: String,
         @Valid @RequestBody request: SnippetRequest,
     ): SnippetResponse = service.create(userId, request.toData()).toResponse()
+
+    /**
+     * US5: los snippets que el usuario puede ver, filtrados por relación, nombre, lenguaje y
+     * validez. Se pagina y ordena con `page`, `size` y `sort` (por ejemplo `sort=status,desc`).
+     */
+    @GetMapping("/snippets")
+    fun list(
+        @RequestHeader(USER_HEADER) @NotBlank userId: String,
+        @RequestParam(defaultValue = "ALL") relation: Relation,
+        @RequestParam(required = false) name: String?,
+        @RequestParam(required = false) language: String?,
+        @RequestParam(required = false) status: ValidityStatus?,
+        @PageableDefault(size = 10, sort = ["name"]) pageable: Pageable,
+    ): SnippetPage {
+        val page = service.list(userId, SnippetFilter(relation, name, language, status), pageable)
+        return SnippetPage(page.content.map { it.toResponse() }, page.number, page.size, page.totalElements)
+    }
 
     /** US6: ver un snippet. Sus tests se piden aparte, en `GET /snippets/{id}/tests`. */
     @GetMapping("/snippets/{id}")

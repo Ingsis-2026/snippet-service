@@ -4,6 +4,7 @@ import com.ingsis.snippet.clients.AlreadyHasAccessException
 import com.ingsis.snippet.clients.UnsupportedLanguageException
 import com.ingsis.snippet.snippets.EmptyFileException
 import com.ingsis.snippet.snippets.InvalidSnippetException
+import com.ingsis.snippet.snippets.InvalidSortException
 import com.ingsis.snippet.snippets.NoAccessException
 import com.ingsis.snippet.snippets.NotOwnerException
 import com.ingsis.snippet.snippets.SnippetNotFoundException
@@ -23,7 +24,7 @@ class ErrorHandler {
             setProperty("errors", e.errors)
         }
 
-    @ExceptionHandler(UnsupportedLanguageException::class, EmptyFileException::class)
+    @ExceptionHandler(UnsupportedLanguageException::class, EmptyFileException::class, InvalidSortException::class)
     fun badRequest(e: RuntimeException): ProblemDetail = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, e.message)
 
     @ExceptionHandler(SnippetNotFoundException::class, TestCaseNotFoundException::class)

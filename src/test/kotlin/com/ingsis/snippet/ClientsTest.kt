@@ -138,6 +138,35 @@ class ClientsTest {
     }
 
     @Test
+    fun `permission-service devuelve los snippets de un usuario`() {
+        val own = UUID.randomUUID()
+        val shared = UUID.randomUUID()
+        server
+            .expect(requestTo("http://permission/permissions/snippets?userId=auth0%7Cana"))
+            .andExpect(method(HttpMethod.GET))
+            .andRespond(
+                withSuccess(
+                    """[{"snippetId": "$own", "userId": "auth0|ana", "role": "OWNER"},
+                        {"snippetId": "$shared", "userId": "auth0|ana", "role": "READ"}]""",
+                    MediaType.APPLICATION_JSON,
+                ),
+            )
+
+        assertEquals(listOf(own, shared), PermissionClient(builder, "http://permission").snippetsOf("auth0|ana", null))
+        server.verify()
+    }
+
+    @Test
+    fun `permission-service filtra los snippets de un usuario por rol`() {
+        server
+            .expect(requestTo("http://permission/permissions/snippets?userId=auth0%7Cana&role=READ"))
+            .andRespond(withSuccess("[]", MediaType.APPLICATION_JSON))
+
+        assertEquals(emptyList(), PermissionClient(builder, "http://permission").snippetsOf("auth0|ana", Role.READ))
+        server.verify()
+    }
+
+    @Test
     fun `language-service ejecuta el codigo con los inputs`() {
         server
             .expect(requestTo("http://language/run"))
