@@ -8,6 +8,7 @@ import com.ingsis.snippet.snippets.Snippet
 import com.ingsis.snippet.snippets.SnippetRepository
 import com.ingsis.snippet.snippets.USER_HEADER
 import com.ingsis.snippet.snippets.ValidityStatus
+import com.ingsis.snippet.storage.ContentStore
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -34,6 +35,7 @@ import kotlin.test.assertEquals
 class UpdateSnippetTest(
     @Autowired private val mockMvc: MockMvc,
     @Autowired private val repository: SnippetRepository,
+    @Autowired private val contents: ContentStore,
 ) {
     @MockitoBean
     private lateinit var languageClient: LanguageClient
@@ -49,7 +51,9 @@ class UpdateSnippetTest(
     fun setUp() {
         snippet =
             repository.save(
-                Snippet("Saludo", "Imprime un número", "printscript", "1.0", original, "auth0|ana", ValidityStatus.COMPLIANT),
+                Snippet("Saludo", "Imprime un número", "printscript", "1.0", "auth0|ana", ValidityStatus.COMPLIANT),
+                original,
+                contents,
             )
         Mockito.`when`(permissionClient.roleOf(snippet.id!!, "auth0|ana")).thenReturn(Role.OWNER)
         Mockito.`when`(permissionClient.roleOf(snippet.id!!, "auth0|beto")).thenReturn(Role.READ)
@@ -97,7 +101,7 @@ class UpdateSnippetTest(
 
         val saved = stored()
         assertEquals("Saludo v2", saved.name)
-        assertEquals(updated, saved.content)
+        assertEquals(updated, contents.load(saved.id!!))
         assertEquals("1.1", saved.version)
     }
 
@@ -107,7 +111,7 @@ class UpdateSnippetTest(
             status { isOk() }
             jsonPath("$.content") { value(updated) }
         }
-        assertEquals(updated, stored().content)
+        assertEquals(updated, contents.load(snippet.id!!))
     }
 
     @Test
@@ -131,7 +135,7 @@ class UpdateSnippetTest(
 
         val saved = stored()
         assertEquals("Saludo", saved.name)
-        assertEquals(original, saved.content)
+        assertEquals(original, contents.load(saved.id!!))
         assertEquals(ValidityStatus.COMPLIANT, saved.status)
     }
 
@@ -141,14 +145,14 @@ class UpdateSnippetTest(
             status { isForbidden() }
             jsonPath("$.detail") { value("Solo el owner puede modificar el snippet") }
         }
-        assertEquals(original, stored().content)
+        assertEquals(original, contents.load(snippet.id!!))
         verifyNoInteractions(languageClient)
     }
 
     @Test
     fun `alguien sin permisos no puede actualizar`() {
         uploadUpdate(user = "auth0|carla").andExpect { status { isForbidden() } }
-        assertEquals(original, stored().content)
+        assertEquals(original, contents.load(snippet.id!!))
     }
 
     @Test
@@ -160,6 +164,6 @@ class UpdateSnippetTest(
     @Test
     fun `actualizar con un archivo vacio es un 400`() {
         uploadUpdate(content = "").andExpect { status { isBadRequest() } }
-        assertEquals(original, stored().content)
+        assertEquals(original, contents.load(snippet.id!!))
     }
 }

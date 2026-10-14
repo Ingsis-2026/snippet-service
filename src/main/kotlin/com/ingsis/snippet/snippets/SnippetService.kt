@@ -5,6 +5,7 @@ import com.ingsis.snippet.clients.LanguageClient
 import com.ingsis.snippet.clients.PermissionClient
 import com.ingsis.snippet.rules.RuleService
 import com.ingsis.snippet.rules.RuleType
+import com.ingsis.snippet.storage.ContentStore
 import org.springframework.context.ApplicationEventPublisher
 import org.springframework.data.domain.Page
 import org.springframework.data.domain.Pageable
@@ -21,9 +22,16 @@ data class SnippetData(
     val content: String,
 )
 
+/** Un snippet con su código, que se guarda aparte de su metadata. */
+data class SnippetWithContent(
+    val snippet: Snippet,
+    val content: String,
+)
+
 /** Se actualizó un snippet. Se publica dentro del update y se atiende cuando quedó guardado (US16). */
 data class SnippetUpdatedEvent(
     val snippet: Snippet,
+    val content: String,
 )
 
 data class SnippetFile(
@@ -36,6 +44,7 @@ class SnippetService(
     private val repository: SnippetRepository,
     private val languageClient: LanguageClient,
     private val permissionClient: PermissionClient,
+    private val contents: ContentStore,
     private val access: SnippetAccess,
     private val ruleService: RuleService,
     private val events: ApplicationEventPublisher,
@@ -44,19 +53,20 @@ class SnippetService(
      * Solo se guarda un snippet que su parser acepta (US1, US3). El owner se registra en
      * permission-service dentro de la misma transacción: si ese llamado falla, el snippet no
      * queda guardado sin dueño.
+     *
+     * El código se guarda antes que el owner: si falla guardarlo, no queda un permiso de un
+     * snippet que no existe. Si el que falla es el owner, queda un blob que nadie lee.
      */
     @Transactional
     fun create(
         ownerId: String,
         data: SnippetData,
-    ): Snippet {
+    ): SnippetWithContent {
         validate(data)
-        val snippet =
-            repository.save(
-                Snippet(data.name, data.description, data.language, data.version, data.content, ownerId),
-            )
+        val snippet = repository.save(Snippet(data.name, data.description, data.language, data.version, ownerId))
+        contents.save(snippet.id!!, data.content)
         permissionClient.grantOwner(snippet.id!!, ownerId)
-        return snippet
+        return SnippetWithContent(snippet, data.content)
     }
 
     /** US6: ver un snippet. Alcanza con que se lo hayan compartido. */
@@ -64,22 +74,23 @@ class SnippetService(
     fun get(
         id: UUID,
         userId: String,
-    ): Snippet = access.requireReader(id, userId)
+    ): SnippetWithContent = withContent(access.requireReader(id, userId))
 
     /**
      * US5: los snippets que el usuario puede ver. Cuáles son lo decide permission-service; el
-     * filtro, el orden y la página se resuelven en la base, sobre esos ids.
+     * filtro, el orden y la página se resuelven en la base, sobre esos ids. El código se lee solo
+     * para los snippets de la página.
      */
     @Transactional(readOnly = true)
     fun list(
         userId: String,
         filter: SnippetFilter,
         pageable: Pageable,
-    ): Page<Snippet> {
+    ): Page<SnippetWithContent> {
         SnippetFilter.requireSortable(pageable.sort)
         val ids = permissionClient.snippetsOf(userId, filter.relation.role)
         if (ids.isEmpty()) return Page.empty(pageable)
-        return repository.findAll(filter.among(ids), pageable)
+        return repository.findAll(filter.among(ids), pageable).map { withContent(it) }
     }
 
     /**
@@ -93,7 +104,7 @@ class SnippetService(
     ): List<CodeError> {
         val snippet = access.requireReader(id, userId)
         val rules = ruleService.configOf(snippet.ownerId, RuleType.LINTING)
-        return languageClient.lint(snippet.content, snippet.language, snippet.version, rules)
+        return languageClient.lint(contents.load(id), snippet.language, snippet.version, rules)
     }
 
     /**
@@ -107,12 +118,13 @@ class SnippetService(
         formatted: Boolean,
     ): SnippetFile {
         val snippet = access.requireReader(id, userId)
+        val original = contents.load(id)
         val content =
             if (formatted) {
                 val rules = ruleService.configOf(snippet.ownerId, RuleType.FORMATTING)
-                languageClient.format(snippet.content, snippet.language, snippet.version, rules)
+                languageClient.format(original, snippet.language, snippet.version, rules)
             } else {
-                snippet.content
+                original
             }
         return SnippetFile("${snippet.name}.${extensionOf(snippet.language)}", content)
     }
@@ -130,10 +142,10 @@ class SnippetService(
         id: UUID,
         ownerId: String,
         userId: String,
-    ): Snippet {
+    ): SnippetWithContent {
         val snippet = access.requireOwner(id, ownerId)
         permissionClient.grantRead(id, userId)
-        return snippet
+        return withContent(snippet)
     }
 
     /**
@@ -148,7 +160,7 @@ class SnippetService(
         id: UUID,
         userId: String,
         data: SnippetData,
-    ): Snippet {
+    ): SnippetWithContent {
         val snippet = access.requireOwner(id, userId)
         validate(data)
         snippet.apply {
@@ -156,13 +168,15 @@ class SnippetService(
             description = data.description
             language = data.language
             version = data.version
-            content = data.content
             status = ValidityStatus.PENDING
         }
         val saved = repository.save(snippet)
-        events.publishEvent(SnippetUpdatedEvent(saved))
-        return saved
+        contents.save(id, data.content)
+        events.publishEvent(SnippetUpdatedEvent(saved, data.content))
+        return SnippetWithContent(saved, data.content)
     }
+
+    private fun withContent(snippet: Snippet) = SnippetWithContent(snippet, contents.load(snippet.id!!))
 
     private fun validate(data: SnippetData) {
         val errors = languageClient.validate(data.content, data.language, data.version)

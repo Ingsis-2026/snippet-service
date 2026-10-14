@@ -7,6 +7,7 @@ import com.ingsis.snippet.snippets.Snippet
 import com.ingsis.snippet.snippets.SnippetRepository
 import com.ingsis.snippet.snippets.USER_HEADER
 import com.ingsis.snippet.snippets.ValidityStatus
+import com.ingsis.snippet.storage.ContentStore
 import org.hamcrest.Matchers.contains
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
@@ -27,6 +28,7 @@ import org.springframework.test.web.servlet.get
 class ListSnippetsTest(
     @Autowired private val mockMvc: MockMvc,
     @Autowired private val repository: SnippetRepository,
+    @Autowired private val contents: ContentStore,
 ) {
     @MockitoBean
     private lateinit var languageClient: LanguageClient
@@ -59,7 +61,7 @@ class ListSnippetsTest(
         language: String,
         owner: String,
         status: ValidityStatus,
-    ) = repository.save(Snippet(name, "Un snippet", language, "1.0", "println(1);", owner, status))
+    ) = repository.save(Snippet(name, "Un snippet", language, "1.0", owner, status), "println(1);", contents)
 
     private fun list(
         vararg params: Pair<String, String>,

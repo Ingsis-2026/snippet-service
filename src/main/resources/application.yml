@@ -14,6 +14,12 @@ services:
   permission-url: ${PERMISSION_URL:http://localhost:8081}
   language-url: ${LANGUAGE_URL:http://localhost:8082}
 
+# El código de los snippets. El default es el Azurite del compose de infra, con la cuenta de
+# desarrollo que trae Azurite (es pública: está en su documentación).
+storage:
+  connection-string: ${BLOB_CONNECTION_STRING:DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://localhost:10000/devstoreaccount1;}
+  container: ${BLOB_CONTAINER:snippets}
+
 management:
   endpoints:
     web:

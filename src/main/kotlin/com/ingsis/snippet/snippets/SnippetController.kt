@@ -71,7 +71,8 @@ data class LintResponse(
     val errors: List<CodeError>,
 )
 
-fun Snippet.toResponse() = SnippetResponse(id!!, name, description, language, version, content, ownerId, status)
+fun SnippetWithContent.toResponse() =
+    with(snippet) { SnippetResponse(id!!, name, description, language, version, content, ownerId, status) }
 
 /**
  * Cada operación existe en dos formas que solo difieren en cómo llega el código: como archivo

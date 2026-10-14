@@ -11,6 +11,7 @@ import com.ingsis.snippet.snippets.InvalidSortException
 import com.ingsis.snippet.snippets.NoAccessException
 import com.ingsis.snippet.snippets.NotOwnerException
 import com.ingsis.snippet.snippets.SnippetNotFoundException
+import com.ingsis.snippet.storage.StorageException
 import com.ingsis.snippet.tests.TestCaseNotFoundException
 import org.springframework.http.HttpStatus
 import org.springframework.http.ProblemDetail
@@ -46,8 +47,8 @@ class ErrorHandler {
     @ExceptionHandler(AlreadyHasAccessException::class)
     fun conflict(e: RuntimeException): ProblemDetail = ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, e.message)
 
-    /** Otro servicio no respondió o respondió con un error que no esperábamos. */
-    @ExceptionHandler(RestClientException::class)
-    fun downstreamFailure(e: RestClientException): ProblemDetail =
+    /** Otro servicio, o Azurite, no respondió o respondió con un error que no esperábamos. */
+    @ExceptionHandler(RestClientException::class, StorageException::class)
+    fun downstreamFailure(e: RuntimeException): ProblemDetail =
         ProblemDetail.forStatusAndDetail(HttpStatus.BAD_GATEWAY, "Falló un servicio interno")
 }

@@ -5,6 +5,7 @@ import com.ingsis.snippet.clients.LanguageClient
 import com.ingsis.snippet.clients.RunOutcome
 import com.ingsis.snippet.snippets.SnippetAccess
 import com.ingsis.snippet.snippets.SnippetUpdatedEvent
+import com.ingsis.snippet.storage.ContentStore
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
@@ -47,6 +48,7 @@ data class TestRunResponse(
 class TestCaseService(
     private val repository: TestCaseRepository,
     private val access: SnippetAccess,
+    private val contents: ContentStore,
     private val languageClient: LanguageClient,
 ) {
     /**
@@ -89,7 +91,7 @@ class TestCaseService(
     ): TestRunResponse {
         val snippet = access.requireReader(snippetId, userId)
         val test = repository.findByIdAndSnippetId(testId, snippetId) ?: throw TestCaseNotFoundException(testId)
-        val outcome = languageClient.run(snippet.content, snippet.language, snippet.version, test.inputs.toList())
+        val outcome = languageClient.run(contents.load(snippetId), snippet.language, snippet.version, test.inputs.toList())
         val passed = test.record(outcome)
         return TestRunResponse(passed, test.outputs.toList(), outcome.outputs, outcome.error)
     }
@@ -105,7 +107,7 @@ class TestCaseService(
         val snippet = event.snippet
         for (test in repository.findAllBySnippetId(snippet.id!!)) {
             try {
-                test.record(languageClient.run(snippet.content, snippet.language, snippet.version, test.inputs.toList()))
+                test.record(languageClient.run(event.content, snippet.language, snippet.version, test.inputs.toList()))
             } catch (e: RuntimeException) {
                 log.warn("No se pudo correr el test ${test.id} del snippet ${snippet.id}", e)
                 test.status = TestStatus.PENDING

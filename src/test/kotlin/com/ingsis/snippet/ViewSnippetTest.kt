@@ -6,6 +6,7 @@ import com.ingsis.snippet.clients.Role
 import com.ingsis.snippet.snippets.Snippet
 import com.ingsis.snippet.snippets.SnippetRepository
 import com.ingsis.snippet.snippets.USER_HEADER
+import com.ingsis.snippet.storage.ContentStore
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -26,6 +27,7 @@ import java.util.UUID
 class ViewSnippetTest(
     @Autowired private val mockMvc: MockMvc,
     @Autowired private val repository: SnippetRepository,
+    @Autowired private val contents: ContentStore,
 ) {
     @MockitoBean
     private lateinit var languageClient: LanguageClient
@@ -38,7 +40,7 @@ class ViewSnippetTest(
 
     @BeforeEach
     fun setUp() {
-        snippet = repository.save(Snippet("Saludo", "Imprime un número", "printscript", "1.0", code, "auth0|ana"))
+        snippet = repository.save(Snippet("Saludo", "Imprime un número", "printscript", "1.0", "auth0|ana"), code, contents)
         Mockito.`when`(permissionClient.roleOf(snippet.id!!, "auth0|ana")).thenReturn(Role.OWNER)
         Mockito.`when`(permissionClient.roleOf(snippet.id!!, "auth0|beto")).thenReturn(Role.READ)
     }
@@ -83,5 +85,16 @@ class ViewSnippetTest(
     @Test
     fun `un snippet que no existe es un 404`() {
         view("auth0|ana", id = UUID.randomUUID()).andExpect { status { isNotFound() } }
+    }
+
+    @Test
+    fun `si no se puede leer su codigo es un 502`() {
+        val withoutCode = repository.save(Snippet("Roto", "Sin código en Azurite", "printscript", "1.0", "auth0|ana"))
+        Mockito.`when`(permissionClient.roleOf(withoutCode.id!!, "auth0|ana")).thenReturn(Role.OWNER)
+
+        view("auth0|ana", id = withoutCode.id!!).andExpect {
+            status { isBadGateway() }
+            jsonPath("$.detail") { value("Falló un servicio interno") }
+        }
     }
 }

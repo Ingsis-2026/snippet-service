@@ -8,6 +8,7 @@ import com.ingsis.snippet.clients.RunOutcome
 import com.ingsis.snippet.snippets.Snippet
 import com.ingsis.snippet.snippets.SnippetRepository
 import com.ingsis.snippet.snippets.USER_HEADER
+import com.ingsis.snippet.storage.ContentStore
 import com.ingsis.snippet.tests.TestCase
 import com.ingsis.snippet.tests.TestCaseRepository
 import com.ingsis.snippet.tests.TestStatus
@@ -40,9 +41,12 @@ class AutomaticTestsTest(
     @Autowired private val mockMvc: MockMvc,
     @Autowired private val snippets: SnippetRepository,
     @Autowired private val tests: TestCaseRepository,
+    @Autowired private val contents: ContentStore,
 ) {
     @MockitoBean
     private lateinit var languageClient: LanguageClient
+
+    private val code = "println(\"Hola\");"
 
     @MockitoBean
     private lateinit var permissionClient: PermissionClient
@@ -54,7 +58,7 @@ class AutomaticTestsTest(
 
     @BeforeEach
     fun setUp() {
-        snippet = snippets.save(Snippet("Saludo", "Saluda", "printscript", "1.1", "println(\"Hola\");", "auth0|ana"))
+        snippet = snippets.save(Snippet("Saludo", "Saluda", "printscript", "1.1", "auth0|ana"), code, contents)
         ana = tests.save(TestCase(snippet, "Saluda a Ana", mutableListOf("Ana"), mutableListOf("Hola Ana")))
         beto = tests.save(TestCase(snippet, "Saluda a Beto", mutableListOf("Beto"), mutableListOf("Chau Beto")))
         Mockito.`when`(permissionClient.roleOf(snippet.id!!, "auth0|ana")).thenReturn(Role.OWNER)
@@ -112,7 +116,7 @@ class AutomaticTestsTest(
             status { isOk() }
             jsonPath("$.content") { value(updated) }
         }
-        assertEquals(updated, snippets.findById(snippet.id!!).get().content)
+        assertEquals(updated, contents.load(snippet.id!!))
     }
 
     @Test
@@ -153,7 +157,7 @@ class AutomaticTestsTest(
     @Test
     fun `correr un test a mano tambien guarda el resultado`() {
         Mockito
-            .`when`(languageClient.run(snippet.content, "printscript", "1.1", listOf("Ana")))
+            .`when`(languageClient.run(code, "printscript", "1.1", listOf("Ana")))
             .thenReturn(RunOutcome(listOf("Hola"), null))
 
         mockMvc.post("/snippets/${snippet.id}/tests/${ana.id}/run") { header(USER_HEADER, "auth0|ana") }.andExpect {
