@@ -9,6 +9,11 @@ spring:
     open-in-view: false
     hibernate:
       ddl-auto: ${DDL_AUTO:update}
+  # La cola de snippets a lintear (US15) es un stream de Redis.
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
 
 services:
   permission-url: ${PERMISSION_URL:http://localhost:8081}
@@ -19,6 +24,10 @@ services:
 storage:
   connection-string: ${BLOB_CONNECTION_STRING:DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://localhost:10000/devstoreaccount1;}
   container: ${BLOB_CONTAINER:snippets}
+
+# Cada réplica lee el stream con su propio nombre de consumer: en Docker, HOSTNAME es el id del container.
+linting:
+  consumer: ${HOSTNAME:snippet-service}
 
 management:
   endpoints:
