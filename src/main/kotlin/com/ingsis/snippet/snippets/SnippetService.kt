@@ -20,6 +20,11 @@ data class SnippetData(
     val content: String,
 )
 
+data class SnippetFile(
+    val filename: String,
+    val content: String,
+)
+
 @Service
 class SnippetService(
     private val repository: SnippetRepository,
@@ -83,6 +88,30 @@ class SnippetService(
         val rules = ruleService.configOf(snippet.ownerId, RuleType.LINTING)
         return languageClient.lint(snippet.content, snippet.language, snippet.version, rules)
     }
+
+    /**
+     * US13: el snippet como archivo, tal cual o formateado. Igual que con el lint, se formatea con
+     * las reglas de su owner, y lo descarga cualquiera que pueda verlo.
+     */
+    @Transactional(readOnly = true)
+    fun download(
+        id: UUID,
+        userId: String,
+        formatted: Boolean,
+    ): SnippetFile {
+        val snippet = access.requireReader(id, userId)
+        val content =
+            if (formatted) {
+                val rules = ruleService.configOf(snippet.ownerId, RuleType.FORMATTING)
+                languageClient.format(snippet.content, snippet.language, snippet.version, rules)
+            } else {
+                snippet.content
+            }
+        return SnippetFile("${snippet.name}.${extensionOf(snippet.language)}", content)
+    }
+
+    /** La extensión que se espera para un lenguaje; texto plano si no se la conoce. */
+    private fun extensionOf(language: String) = if (language.equals("printscript", ignoreCase = true)) "ps" else "txt"
 
     /**
      * US7: solo el owner comparte, y quien lo recibe queda con permiso de lectura sobre el
