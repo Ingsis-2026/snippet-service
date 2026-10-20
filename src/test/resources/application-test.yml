@@ -6,3 +6,13 @@ spring:
   jpa:
     hibernate:
       ddl-auto: create-drop
+
+# Sin Redis: las colas son RecordingLintQueue y RecordingFormatQueue, en memoria.
+streams:
+  redis:
+    enabled: false
+
+management:
+  health:
+    redis:
+      enabled: false

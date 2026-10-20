@@ -1,5 +1,6 @@
 package com.ingsis.snippet.rules
 
+import org.springframework.context.ApplicationEventPublisher
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 
@@ -18,12 +19,29 @@ data class RuleChange(
 )
 
 /**
+ * Cambiaron las reglas de lint de un usuario: hay que volver a lintear todos sus snippets (US15).
+ * Se publica dentro de la transacción del cambio.
+ */
+data class LintingRulesChangedEvent(
+    val ownerId: String,
+)
+
+/**
+ * Cambiaron las reglas de formato de un usuario: hay que volver a formatear todos sus snippets
+ * (US12). Se publica dentro de la transacción del cambio.
+ */
+data class FormattingRulesChangedEvent(
+    val ownerId: String,
+)
+
+/**
  * Las reglas que elige cada usuario (US11, US14). Valen para todos los snippets de los que es
  * owner, y se le pasan a language-service en cada llamada.
  */
 @Service
 class RuleService(
     private val repository: UserRuleRepository,
+    private val events: ApplicationEventPublisher,
 ) {
     /** Todas las reglas del tipo, con el estado que eligió el usuario o apagadas si no tocó la regla. */
     @Transactional(readOnly = true)
@@ -41,6 +59,9 @@ class RuleService(
     /**
      * Habilita, deshabilita o cambia el valor de las reglas de [changes]; las demás quedan como
      * estaban. Si un cambio no es válido no se guarda ninguno.
+     *
+     * Un cambio a las de lint dispara el re-linteo de todos los snippets del usuario (US15), y uno
+     * a las de formato, su formateo (US12). Los dos corren aparte: no se los espera para responder.
      */
     @Transactional
     fun update(
@@ -58,6 +79,14 @@ class RuleService(
         }
         requireCompatible(type, saved.values)
         repository.saveAll(saved.values)
+        if (changes.isNotEmpty()) {
+            events.publishEvent(
+                when (type) {
+                    RuleType.LINTING -> LintingRulesChangedEvent(userId)
+                    RuleType.FORMATTING -> FormattingRulesChangedEvent(userId)
+                },
+            )
+        }
         return rulesOf(userId, type)
     }
 
