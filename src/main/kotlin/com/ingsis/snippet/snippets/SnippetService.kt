@@ -50,6 +50,22 @@ class SnippetService(
     ): Snippet = access.requireReader(id, userId)
 
     /**
+     * US7: solo el owner comparte, y quien lo recibe queda con permiso de lectura sobre el
+     * snippet y sus tests. Compartirlo con alguien que ya tiene acceso, incluido el owner, es un
+     * conflicto.
+     */
+    @Transactional(readOnly = true)
+    fun share(
+        id: UUID,
+        ownerId: String,
+        userId: String,
+    ): Snippet {
+        val snippet = access.requireOwner(id, ownerId)
+        permissionClient.grantRead(id, userId)
+        return snippet
+    }
+
+    /**
      * Reemplaza todos los datos del snippet (US2, US4). Solo puede hacerlo su owner, y el
      * resultado tiene que cumplir las reglas del lenguaje, que puede haber cambiado.
      *

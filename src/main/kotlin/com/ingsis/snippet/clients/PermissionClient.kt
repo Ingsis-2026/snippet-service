@@ -32,14 +32,31 @@ class PermissionClient(
     fun grantOwner(
         snippetId: UUID,
         userId: String,
+    ) = grant(snippetId, userId, Role.OWNER)
+
+    /** US7: el usuario pasa a poder ver el snippet y sus tests. */
+    fun grantRead(
+        snippetId: UUID,
+        userId: String,
+    ) = grant(snippetId, userId, Role.READ)
+
+    private fun grant(
+        snippetId: UUID,
+        userId: String,
+        role: Role,
     ) {
-        client
-            .post()
-            .uri("/permissions")
-            .contentType(MediaType.APPLICATION_JSON)
-            .body(PermissionRequest(snippetId, userId, Role.OWNER))
-            .retrieve()
-            .toBodilessEntity()
+        try {
+            client
+                .post()
+                .uri("/permissions")
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(PermissionRequest(snippetId, userId, role))
+                .retrieve()
+                .toBodilessEntity()
+        } catch (e: HttpClientErrorException.Conflict) {
+            // permission-service guarda un solo rol por usuario y snippet.
+            throw AlreadyHasAccessException(userId)
+        }
     }
 
     /** El rol del usuario sobre el snippet, o `null` si no tiene ninguno. */
@@ -63,3 +80,7 @@ class PermissionClient(
             null
         }
 }
+
+class AlreadyHasAccessException(
+    userId: String,
+) : RuntimeException("El usuario $userId ya tiene acceso a este snippet")
