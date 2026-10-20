@@ -28,6 +28,11 @@ data class SnippetWithContent(
     val content: String,
 )
 
+/** Se creó un snippet. Se publica dentro de la creación y se atiende cuando quedó guardado. */
+data class SnippetCreatedEvent(
+    val snippet: Snippet,
+)
+
 /** Se actualizó un snippet. Se publica dentro del update y se atiende cuando quedó guardado (US16). */
 data class SnippetUpdatedEvent(
     val snippet: Snippet,
@@ -56,6 +61,8 @@ class SnippetService(
      *
      * El código se guarda antes que el owner: si falla guardarlo, no queda un permiso de un
      * snippet que no existe. Si el que falla es el owner, queda un blob que nadie lee.
+     *
+     * Arranca `PENDING`: se lintea aparte, una vez guardado.
      */
     @Transactional
     fun create(
@@ -66,6 +73,7 @@ class SnippetService(
         val snippet = repository.save(Snippet(data.name, data.description, data.language, data.version, ownerId))
         contents.save(snippet.id!!, data.content)
         permissionClient.grantOwner(snippet.id!!, ownerId)
+        events.publishEvent(SnippetCreatedEvent(snippet))
         return SnippetWithContent(snippet, data.content)
     }
 
@@ -101,10 +109,12 @@ class SnippetService(
     fun lint(
         id: UUID,
         userId: String,
-    ): List<CodeError> {
-        val snippet = access.requireReader(id, userId)
+    ): List<CodeError> = errorsOf(access.requireReader(id, userId))
+
+    /** Las reglas de lint de su owner que el snippet no cumple, con su código tal como está ahora. */
+    fun errorsOf(snippet: Snippet): List<CodeError> {
         val rules = ruleService.configOf(snippet.ownerId, RuleType.LINTING)
-        return languageClient.lint(contents.load(id), snippet.language, snippet.version, rules)
+        return languageClient.lint(contents.load(snippet.id!!), snippet.language, snippet.version, rules)
     }
 
     /**
@@ -153,7 +163,7 @@ class SnippetService(
      * resultado tiene que cumplir las reglas del lenguaje, que puede haber cambiado.
      *
      * El estado vuelve a `PENDING`: el contenido nuevo todavía no se linteó. Una vez guardado, se
-     * corren todos sus tests (US16).
+     * lintea aparte y se corren todos sus tests (US16).
      */
     @Transactional
     fun update(

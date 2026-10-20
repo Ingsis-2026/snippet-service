@@ -6,3 +6,13 @@ spring:
   jpa:
     hibernate:
       ddl-auto: create-drop
+
+# Sin Redis: la cola de lint es RecordingLintQueue, en memoria.
+linting:
+  redis:
+    enabled: false
+
+management:
+  health:
+    redis:
+      enabled: false
