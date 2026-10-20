@@ -73,6 +73,35 @@ class AssetServiceContentStoreTest {
     }
 
     @Test
+    fun `borra el asset del snippet`() {
+        server
+            .expect(requestTo("http://asset/v1/asset/snippets/$id"))
+            .andExpect(method(HttpMethod.DELETE))
+            .andRespond(withStatus(HttpStatus.NO_CONTENT))
+
+        store.delete(id)
+
+        server.verify()
+    }
+
+    @Test
+    fun `borrar un codigo que ya no estaba tambien esta bien`() {
+        server.expect(requestTo("http://asset/v1/asset/snippets/$id")).andRespond(withStatus(HttpStatus.NOT_FOUND))
+
+        store.delete(id)
+
+        server.verify()
+    }
+
+    @Test
+    fun `si asset-service falla al borrar dice de que snippet era el codigo`() {
+        server.expect(requestTo("http://asset/v1/asset/snippets/$id")).andRespond(withStatus(HttpStatus.INTERNAL_SERVER_ERROR))
+
+        val error = assertFailsWith<StorageException> { store.delete(id) }
+        assertEquals("No se pudo borrar el código del snippet $id", error.message)
+    }
+
+    @Test
     fun `si asset-service falla al guardar dice de que snippet era el codigo`() {
         server.expect(requestTo("http://asset/v1/asset/snippets/$id")).andRespond(withStatus(HttpStatus.INTERNAL_SERVER_ERROR))
 

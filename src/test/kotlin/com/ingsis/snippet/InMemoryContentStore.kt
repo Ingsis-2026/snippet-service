@@ -29,6 +29,10 @@ class InMemoryContentStore : ContentStore {
     /** Falla igual que [com.ingsis.snippet.storage.AssetServiceContentStore] cuando el código no está. */
     override fun load(id: UUID): String =
         contents[id] ?: throw StorageException("No se pudo leer el código del snippet $id", NoSuchElementException())
+
+    override fun delete(id: UUID) {
+        contents.remove(id)
+    }
 }
 
 /** Guarda un snippet como lo hace SnippetService: la metadata en la base y el código en el store. */
