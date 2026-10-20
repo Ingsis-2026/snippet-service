@@ -10,6 +10,7 @@ import org.springframework.http.HttpHeaders
 import org.springframework.http.HttpStatus
 import org.springframework.http.MediaType
 import org.springframework.http.ResponseEntity
+import org.springframework.web.bind.annotation.DeleteMapping
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
@@ -64,6 +65,15 @@ data class SnippetPage(
     val page: Int,
     val size: Int,
     val total: Long,
+)
+
+/** El código del editor, que puede no ser el que está guardado. */
+data class FormatRequest(
+    val content: String,
+)
+
+data class FormatResponse(
+    val content: String,
 )
 
 data class LintResponse(
@@ -155,6 +165,22 @@ class SnippetController(
         val errors = service.lint(id, userId)
         return LintResponse(valid = errors.isEmpty(), errors = errors)
     }
+
+    /** Formatear el código del editor con las reglas del owner, sin guardarlo. */
+    @PostMapping("/snippets/{id}/format")
+    fun format(
+        @PathVariable id: UUID,
+        @RequestHeader(USER_HEADER) @NotBlank userId: String,
+        @RequestBody request: FormatRequest,
+    ): FormatResponse = FormatResponse(service.format(id, userId, request.content))
+
+    /** Borrar un snippet propio, con sus tests. */
+    @DeleteMapping("/snippets/{id}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    fun delete(
+        @PathVariable id: UUID,
+        @RequestHeader(USER_HEADER) @NotBlank userId: String,
+    ) = service.delete(id, userId)
 
     /** US13: descargar un snippet, en su versión original o formateada (`formatted=true`). */
     @GetMapping("/snippets/{id}/download")

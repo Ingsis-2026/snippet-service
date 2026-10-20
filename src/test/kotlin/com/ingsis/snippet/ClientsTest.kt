@@ -102,6 +102,19 @@ class ClientsTest {
     }
 
     @Test
+    fun `permission-service borra los permisos de un snippet`() {
+        val snippetId = UUID.randomUUID()
+        server
+            .expect(requestTo("http://permission/permissions?snippetId=$snippetId"))
+            .andExpect(method(HttpMethod.DELETE))
+            .andRespond(withStatus(HttpStatus.NO_CONTENT))
+
+        PermissionClient(builder, "http://permission").revokeAll(snippetId)
+
+        server.verify()
+    }
+
+    @Test
     fun `un error de permission-service se propaga`() {
         server.expect(requestTo("http://permission/permissions")).andRespond(withStatus(HttpStatus.INTERNAL_SERVER_ERROR))
 

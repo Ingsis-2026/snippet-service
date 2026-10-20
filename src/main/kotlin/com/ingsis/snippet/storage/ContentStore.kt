@@ -3,6 +3,7 @@ package com.ingsis.snippet.storage
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.http.MediaType
 import org.springframework.stereotype.Component
+import org.springframework.web.client.HttpClientErrorException
 import org.springframework.web.client.RestClient
 import org.springframework.web.client.RestClientException
 import org.springframework.web.client.body
@@ -17,6 +18,9 @@ interface ContentStore {
     )
 
     fun load(id: UUID): String
+
+    /** Borra el código del snippet. Si ya no estaba, no hay nada que hacer. */
+    fun delete(id: UUID)
 }
 
 /**
@@ -61,6 +65,21 @@ class AssetServiceContentStore(
                     .body<ByteArray>()
             // Un asset vacío llega sin cuerpo.
             bytes?.toString(Charsets.UTF_8) ?: ""
+        }
+
+    /** asset-service responde 204 si lo borró y 404 si no existía: los dos dejan el código borrado. */
+    override fun delete(id: UUID) =
+        storing(id, "borrar") {
+            try {
+                client
+                    .delete()
+                    .uri(ASSET_PATH, container, id)
+                    .retrieve()
+                    .toBodilessEntity()
+            } catch (e: HttpClientErrorException.NotFound) {
+                // Ya estaba borrado.
+            }
+            Unit
         }
 
     private fun <T> storing(

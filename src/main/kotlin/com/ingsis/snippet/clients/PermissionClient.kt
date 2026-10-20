@@ -60,6 +60,15 @@ class PermissionClient(
         }
     }
 
+    /** Se borró el snippet: nadie, ni su owner, tiene más permisos sobre él. */
+    fun revokeAll(snippetId: UUID) {
+        client
+            .delete()
+            .uri { it.path("/permissions").queryParam("snippetId", snippetId).build() }
+            .retrieve()
+            .toBodilessEntity()
+    }
+
     /** El rol del usuario sobre el snippet, o `null` si no tiene ninguno. */
     fun roleOf(
         snippetId: UUID,

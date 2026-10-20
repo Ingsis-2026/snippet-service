@@ -4,9 +4,11 @@ import com.ingsis.snippet.snippets.USER_HEADER
 import jakarta.validation.Valid
 import jakarta.validation.constraints.NotBlank
 import org.springframework.http.HttpStatus
+import org.springframework.web.bind.annotation.DeleteMapping
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
+import org.springframework.web.bind.annotation.PutMapping
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestHeader
 import org.springframework.web.bind.annotation.ResponseStatus
@@ -42,6 +44,23 @@ class TestCaseController(
         @PathVariable testId: UUID,
         @RequestHeader(USER_HEADER) @NotBlank userId: String,
     ): TestRunResponse = service.run(snippetId, testId, userId)
+
+    /** Editar un test de un snippet propio. Se mandan todos sus datos, cambien o no. */
+    @PutMapping("/snippets/{snippetId}/tests/{testId}")
+    fun update(
+        @PathVariable snippetId: UUID,
+        @PathVariable testId: UUID,
+        @RequestHeader(USER_HEADER) @NotBlank userId: String,
+        @Valid @RequestBody request: TestCaseRequest,
+    ): TestCaseResponse = service.update(snippetId, testId, userId, request.toData())
+
+    @DeleteMapping("/snippets/{snippetId}/tests/{testId}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    fun delete(
+        @PathVariable snippetId: UUID,
+        @PathVariable testId: UUID,
+        @RequestHeader(USER_HEADER) @NotBlank userId: String,
+    ) = service.delete(snippetId, testId, userId)
 
     @GetMapping("/snippets/{snippetId}/tests")
     fun list(

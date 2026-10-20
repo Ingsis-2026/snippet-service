@@ -10,6 +10,7 @@ import com.ingsis.snippet.snippets.SnippetRepository
 import com.ingsis.snippet.snippets.USER_HEADER
 import com.ingsis.snippet.storage.ContentStore
 import com.ingsis.snippet.tests.TestCaseRepository
+import com.ingsis.snippet.tests.TestStatus
 import org.hamcrest.Matchers.contains
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
@@ -23,8 +24,10 @@ import org.springframework.http.MediaType
 import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.context.bean.override.mockito.MockitoBean
 import org.springframework.test.web.servlet.MockMvc
+import org.springframework.test.web.servlet.delete
 import org.springframework.test.web.servlet.get
 import org.springframework.test.web.servlet.post
+import org.springframework.test.web.servlet.put
 import java.util.UUID
 import kotlin.test.assertEquals
 
@@ -248,6 +251,99 @@ class TestCaseTest(
     @Test
     fun `correr un test que no existe es un 404`() {
         runTest(UUID.randomUUID().toString()).andExpect { status { isNotFound() } }
+    }
+
+    // Editar y borrar un test, desde la UI.
+
+    private fun update(
+        testId: String,
+        body: String,
+        user: String = "auth0|ana",
+    ) = mockMvc.put("/snippets/${snippet.id}/tests/$testId") {
+        header(USER_HEADER, user)
+        contentType = MediaType.APPLICATION_JSON
+        content = body
+    }
+
+    private fun delete(
+        testId: String,
+        user: String = "auth0|ana",
+        snippetId: UUID = snippet.id!!,
+    ) = mockMvc.delete("/snippets/$snippetId/tests/$testId") { header(USER_HEADER, user) }
+
+    @Test
+    fun `el owner edita un test y se reemplazan todos sus datos`() {
+        val testId = createdTestId()
+
+        update(testId, """{"name": "Saluda a uno", "inputs": ["Carla"], "outputs": ["Hola Carla"]}""").andExpect {
+            status { isOk() }
+            jsonPath("$.id") { value(testId) }
+            jsonPath("$.name") { value("Saluda a uno") }
+            jsonPath("$.inputs") { value(contains("Carla")) }
+            jsonPath("$.outputs") { value(contains("Hola Carla")) }
+        }
+        list("auth0|ana").andExpect {
+            jsonPath("$.length()") { value(1) }
+            jsonPath("$[0].inputs") { value(contains("Carla")) }
+        }
+    }
+
+    @Test
+    fun `un test editado vuelve a PENDING porque su resultado era de los datos anteriores`() {
+        val testId = createdTestId()
+        languageServiceAnswers(RunOutcome(listOf("Hola Ana", "Hola Beto", "Chau"), error = null))
+        runTest(testId)
+        assertEquals(TestStatus.PASSED, tests.findAll().single().status)
+
+        update(testId, greeting).andExpect { jsonPath("$.status") { value("PENDING") } }
+    }
+
+    @Test
+    fun `alguien con permiso de lectura no puede editar ni borrar tests`() {
+        val testId = createdTestId()
+
+        update(testId, """{"name": "Otro"}""", user = "auth0|beto").andExpect { status { isForbidden() } }
+        delete(testId, user = "auth0|beto").andExpect { status { isForbidden() } }
+        list("auth0|ana").andExpect { jsonPath("$[0].name") { value("Saluda a dos") } }
+    }
+
+    @Test
+    fun `editar un test sin nombre es un 400`() {
+        val testId = createdTestId()
+        update(testId, """{"name": ""}""").andExpect { status { isBadRequest() } }
+    }
+
+    @Test
+    fun `editar un test que no existe es un 404`() {
+        update(UUID.randomUUID().toString(), greeting).andExpect { status { isNotFound() } }
+    }
+
+    @Test
+    fun `el owner borra un test y los demas quedan`() {
+        val testId = createdTestId()
+        create("""{"name": "Otro"}""")
+
+        delete(testId).andExpect { status { isNoContent() } }
+
+        list("auth0|ana").andExpect {
+            jsonPath("$.length()") { value(1) }
+            jsonPath("$[0].name") { value("Otro") }
+        }
+    }
+
+    @Test
+    fun `borrar un test que no existe es un 404`() {
+        delete(UUID.randomUUID().toString()).andExpect { status { isNotFound() } }
+    }
+
+    @Test
+    fun `un test de otro snippet no se puede borrar desde este`() {
+        val testId = createdTestId()
+        val other = snippets.save(Snippet("Otro", "d", "printscript", "1.1", "auth0|ana"), "println(1);", contents)
+        Mockito.`when`(permissionClient.roleOf(other.id!!, "auth0|ana")).thenReturn(Role.OWNER)
+
+        delete(testId, snippetId = other.id!!).andExpect { status { isNotFound() } }
+        assertEquals(1, tests.count())
     }
 
     @Test
