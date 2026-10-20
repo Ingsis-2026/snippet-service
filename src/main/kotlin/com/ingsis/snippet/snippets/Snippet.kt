@@ -8,6 +8,7 @@ import jakarta.persistence.GeneratedValue
 import jakarta.persistence.GenerationType
 import jakarta.persistence.Id
 import org.springframework.data.jpa.repository.JpaRepository
+import org.springframework.data.jpa.repository.JpaSpecificationExecutor
 import java.util.UUID
 
 /** Si el snippet cumple las reglas de lint de su owner (US5). Arranca `PENDING` hasta que se lintee. */
@@ -35,4 +36,6 @@ class Snippet(
     val id: UUID? = null,
 )
 
-interface SnippetRepository : JpaRepository<Snippet, UUID>
+interface SnippetRepository :
+    JpaRepository<Snippet, UUID>,
+    JpaSpecificationExecutor<Snippet>

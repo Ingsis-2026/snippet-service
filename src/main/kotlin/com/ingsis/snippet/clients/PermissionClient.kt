@@ -6,6 +6,7 @@ import org.springframework.stereotype.Component
 import org.springframework.web.client.HttpClientErrorException
 import org.springframework.web.client.RestClient
 import org.springframework.web.client.body
+import java.util.Optional
 import java.util.UUID
 
 enum class Role { OWNER, READ }
@@ -79,6 +80,23 @@ class PermissionClient(
         } catch (e: HttpClientErrorException.NotFound) {
             null
         }
+
+    /** US5: los snippets sobre los que el usuario tiene algún permiso, o solo los de [role]. */
+    fun snippetsOf(
+        userId: String,
+        role: Role?,
+    ): List<UUID> =
+        client
+            .get()
+            .uri {
+                it
+                    .path("/permissions/snippets")
+                    .queryParam("userId", userId)
+                    .queryParamIfPresent("role", Optional.ofNullable(role))
+                    .build()
+            }.retrieve()
+            .body<List<PermissionResponse>>()!!
+            .map { it.snippetId }
 }
 
 class AlreadyHasAccessException(
