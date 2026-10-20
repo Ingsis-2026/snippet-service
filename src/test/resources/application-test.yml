@@ -7,8 +7,8 @@ spring:
     hibernate:
       ddl-auto: create-drop
 
-# Sin Redis: la cola de lint es RecordingLintQueue, en memoria.
-linting:
+# Sin Redis: las colas son RecordingLintQueue y RecordingFormatQueue, en memoria.
+streams:
   redis:
     enabled: false
 

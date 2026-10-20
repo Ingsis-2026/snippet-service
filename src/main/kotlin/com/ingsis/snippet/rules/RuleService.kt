@@ -27,6 +27,14 @@ data class LintingRulesChangedEvent(
 )
 
 /**
+ * Cambiaron las reglas de formato de un usuario: hay que volver a formatear todos sus snippets
+ * (US12). Se publica dentro de la transacción del cambio.
+ */
+data class FormattingRulesChangedEvent(
+    val ownerId: String,
+)
+
+/**
  * Las reglas que elige cada usuario (US11, US14). Valen para todos los snippets de los que es
  * owner, y se le pasan a language-service en cada llamada.
  */
@@ -52,8 +60,8 @@ class RuleService(
      * Habilita, deshabilita o cambia el valor de las reglas de [changes]; las demás quedan como
      * estaban. Si un cambio no es válido no se guarda ninguno.
      *
-     * Un cambio a las de lint dispara el re-linteo de todos los snippets del usuario (US15), que
-     * corre aparte: no se lo espera para responder.
+     * Un cambio a las de lint dispara el re-linteo de todos los snippets del usuario (US15), y uno
+     * a las de formato, su formateo (US12). Los dos corren aparte: no se los espera para responder.
      */
     @Transactional
     fun update(
@@ -71,7 +79,14 @@ class RuleService(
         }
         requireCompatible(type, saved.values)
         repository.saveAll(saved.values)
-        if (type == RuleType.LINTING && changes.isNotEmpty()) events.publishEvent(LintingRulesChangedEvent(userId))
+        if (changes.isNotEmpty()) {
+            events.publishEvent(
+                when (type) {
+                    RuleType.LINTING -> LintingRulesChangedEvent(userId)
+                    RuleType.FORMATTING -> FormattingRulesChangedEvent(userId)
+                },
+            )
+        }
         return rulesOf(userId, type)
     }
 

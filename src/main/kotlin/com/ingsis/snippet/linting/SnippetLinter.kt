@@ -20,7 +20,7 @@ import kotlin.jvm.optionals.getOrNull
  * Los snippets que hay que lintear (US15). Encolar no lintea: de eso se encarga un worker aparte,
  * así quien cambió las reglas no espera a que se linteen todos sus snippets.
  */
-interface LintQueue {
+fun interface LintQueue {
     fun enqueue(snippetIds: Collection<UUID>)
 }
 

@@ -9,7 +9,7 @@ spring:
     open-in-view: false
     hibernate:
       ddl-auto: ${DDL_AUTO:update}
-  # La cola de snippets a lintear (US15) es un stream de Redis.
+  # Las colas de snippets a lintear (US15) y a formatear (US12) son streams de Redis.
   data:
     redis:
       host: ${REDIS_HOST:localhost}
@@ -25,8 +25,8 @@ storage:
   connection-string: ${BLOB_CONNECTION_STRING:DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://localhost:10000/devstoreaccount1;}
   container: ${BLOB_CONTAINER:snippets}
 
-# Cada réplica lee el stream con su propio nombre de consumer: en Docker, HOSTNAME es el id del container.
-linting:
+# Cada réplica lee los streams con su propio nombre de consumer: en Docker, HOSTNAME es el id del container.
+streams:
   consumer: ${HOSTNAME:snippet-service}
 
 management:
