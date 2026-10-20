@@ -1,5 +1,6 @@
 package com.ingsis.snippet.snippets
 
+import com.ingsis.snippet.clients.CodeError
 import jakarta.validation.Valid
 import jakarta.validation.constraints.NotBlank
 import org.springframework.data.domain.Pageable
@@ -60,6 +61,11 @@ data class SnippetPage(
     val page: Int,
     val size: Int,
     val total: Long,
+)
+
+data class LintResponse(
+    val valid: Boolean,
+    val errors: List<CodeError>,
 )
 
 fun Snippet.toResponse() = SnippetResponse(id!!, name, description, language, version, content, ownerId, status)
@@ -135,6 +141,16 @@ class SnippetController(
         @RequestHeader(USER_HEADER) @NotBlank userId: String,
         @Valid @RequestBody request: SnippetRequest,
     ): SnippetResponse = service.update(id, userId, request.toData()).toResponse()
+
+    /** US14: qué reglas de lint de su owner no cumple el snippet, con su línea y columna. */
+    @GetMapping("/snippets/{id}/lint")
+    fun lint(
+        @PathVariable id: UUID,
+        @RequestHeader(USER_HEADER) @NotBlank userId: String,
+    ): LintResponse {
+        val errors = service.lint(id, userId)
+        return LintResponse(valid = errors.isEmpty(), errors = errors)
+    }
 
     /** US7: compartir un snippet propio con otro usuario. */
     @PostMapping("/snippets/{id}/share")

@@ -167,6 +167,29 @@ class ClientsTest {
     }
 
     @Test
+    fun `language-service lintea el codigo con las reglas`() {
+        server
+            .expect(requestTo("http://language/lint"))
+            .andExpect(method(HttpMethod.POST))
+            .andExpect(
+                content().json(
+                    """{"code": "x", "language": "printscript", "version": "1.0", "rules": {"identifier_format": "camel case"}}""",
+                ),
+            ).andRespond(
+                withSuccess(
+                    """{"valid": false, "errors": [{"rule": "The following identifier must be in camel case", "line": 1, "column": 5}]}""",
+                    MediaType.APPLICATION_JSON,
+                ),
+            )
+
+        val errors =
+            LanguageClient(builder, "http://language").lint("x", "printscript", "1.0", mapOf("identifier_format" to "camel case"))
+
+        assertEquals(listOf(CodeError("The following identifier must be in camel case", 1, 5)), errors)
+        server.verify()
+    }
+
+    @Test
     fun `language-service ejecuta el codigo con los inputs`() {
         server
             .expect(requestTo("http://language/run"))
