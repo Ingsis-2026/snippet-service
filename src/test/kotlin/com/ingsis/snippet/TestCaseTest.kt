@@ -1,8 +1,10 @@
 package com.ingsis.snippet
 
+import com.ingsis.snippet.clients.CodeError
 import com.ingsis.snippet.clients.LanguageClient
 import com.ingsis.snippet.clients.PermissionClient
 import com.ingsis.snippet.clients.Role
+import com.ingsis.snippet.clients.RunOutcome
 import com.ingsis.snippet.snippets.Snippet
 import com.ingsis.snippet.snippets.SnippetRepository
 import com.ingsis.snippet.snippets.USER_HEADER
@@ -163,5 +165,96 @@ class TestCaseTest(
             status { isForbidden() }
             jsonPath("$.detail") { value("No tenés acceso a este snippet") }
         }
+    }
+
+    // US6: correr un test desde la vista del snippet.
+
+    private fun createdTestId(body: String = greeting): String {
+        val response = create(body).andReturn().response.contentAsString
+        return Regex("\"id\":\"([^\"]+)\"").find(response)!!.groupValues[1]
+    }
+
+    private fun runTest(
+        testId: String,
+        user: String = "auth0|ana",
+        snippetId: UUID = snippet.id!!,
+    ) = mockMvc.post("/snippets/$snippetId/tests/$testId/run") { header(USER_HEADER, user) }
+
+    private fun languageServiceAnswers(outcome: RunOutcome) {
+        Mockito
+            .`when`(languageClient.run(snippet.content, "printscript", "1.1", listOf("Ana", "Beto")))
+            .thenReturn(outcome)
+    }
+
+    @Test
+    fun `un test pasa si el snippet imprime exactamente los outputs esperados`() {
+        val testId = createdTestId()
+        languageServiceAnswers(RunOutcome(listOf("Hola Ana", "Hola Beto", "Chau"), error = null))
+
+        runTest(testId).andExpect {
+            status { isOk() }
+            jsonPath("$.passed") { value(true) }
+            jsonPath("$.expected") { value(contains("Hola Ana", "Hola Beto", "Chau")) }
+            jsonPath("$.actual") { value(contains("Hola Ana", "Hola Beto", "Chau")) }
+            jsonPath("$.error") { value(null) }
+        }
+    }
+
+    @Test
+    fun `un test falla si los outputs no coinciden o vienen en otro orden`() {
+        val testId = createdTestId()
+        languageServiceAnswers(RunOutcome(listOf("Hola Beto", "Hola Ana", "Chau"), error = null))
+
+        runTest(testId).andExpect {
+            jsonPath("$.passed") { value(false) }
+            jsonPath("$.actual") { value(contains("Hola Beto", "Hola Ana", "Chau")) }
+        }
+    }
+
+    @Test
+    fun `un test falla si el snippet termina con error, aunque haya impreso lo esperado`() {
+        val testId = createdTestId()
+        languageServiceAnswers(
+            RunOutcome(listOf("Hola Ana", "Hola Beto", "Chau"), CodeError("Division por cero", 4, 9)),
+        )
+
+        runTest(testId).andExpect {
+            jsonPath("$.passed") { value(false) }
+            jsonPath("$.error.rule") { value("Division por cero") }
+            jsonPath("$.error.line") { value(4) }
+        }
+    }
+
+    @Test
+    fun `alguien con quien se compartio el snippet puede correr sus tests`() {
+        val testId = createdTestId()
+        languageServiceAnswers(RunOutcome(listOf("Hola Ana", "Hola Beto", "Chau"), error = null))
+
+        runTest(testId, user = "auth0|beto").andExpect {
+            status { isOk() }
+            jsonPath("$.passed") { value(true) }
+        }
+    }
+
+    @Test
+    fun `alguien sin permisos no puede correr los tests`() {
+        val testId = createdTestId()
+        runTest(testId, user = "auth0|carla").andExpect { status { isForbidden() } }
+        verifyNoInteractions(languageClient)
+    }
+
+    @Test
+    fun `correr un test que no existe es un 404`() {
+        runTest(UUID.randomUUID().toString()).andExpect { status { isNotFound() } }
+    }
+
+    @Test
+    fun `un test de otro snippet no se puede correr desde este`() {
+        val testId = createdTestId()
+        val other = snippets.save(Snippet("Otro", "d", "printscript", "1.1", "println(1);", "auth0|ana"))
+        Mockito.`when`(permissionClient.roleOf(other.id!!, "auth0|ana")).thenReturn(Role.OWNER)
+
+        runTest(testId, snippetId = other.id!!).andExpect { status { isNotFound() } }
+        verifyNoInteractions(languageClient)
     }
 }

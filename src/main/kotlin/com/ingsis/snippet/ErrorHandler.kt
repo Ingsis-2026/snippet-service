@@ -6,6 +6,7 @@ import com.ingsis.snippet.snippets.InvalidSnippetException
 import com.ingsis.snippet.snippets.NoAccessException
 import com.ingsis.snippet.snippets.NotOwnerException
 import com.ingsis.snippet.snippets.SnippetNotFoundException
+import com.ingsis.snippet.tests.TestCaseNotFoundException
 import org.springframework.http.HttpStatus
 import org.springframework.http.ProblemDetail
 import org.springframework.web.bind.annotation.ExceptionHandler
@@ -24,8 +25,8 @@ class ErrorHandler {
     @ExceptionHandler(UnsupportedLanguageException::class, EmptyFileException::class)
     fun badRequest(e: RuntimeException): ProblemDetail = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, e.message)
 
-    @ExceptionHandler(SnippetNotFoundException::class)
-    fun notFound(e: SnippetNotFoundException): ProblemDetail = ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, e.message)
+    @ExceptionHandler(SnippetNotFoundException::class, TestCaseNotFoundException::class)
+    fun notFound(e: RuntimeException): ProblemDetail = ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, e.message)
 
     @ExceptionHandler(NotOwnerException::class, NoAccessException::class)
     fun forbidden(e: RuntimeException): ProblemDetail = ProblemDetail.forStatusAndDetail(HttpStatus.FORBIDDEN, e.message)

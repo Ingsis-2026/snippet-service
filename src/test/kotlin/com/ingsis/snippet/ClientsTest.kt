@@ -4,6 +4,7 @@ import com.ingsis.snippet.clients.CodeError
 import com.ingsis.snippet.clients.LanguageClient
 import com.ingsis.snippet.clients.PermissionClient
 import com.ingsis.snippet.clients.Role
+import com.ingsis.snippet.clients.RunOutcome
 import com.ingsis.snippet.clients.UnsupportedLanguageException
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
@@ -110,5 +111,24 @@ class ClientsTest {
             .andRespond(withStatus(HttpStatus.NOT_FOUND))
 
         assertEquals(null, PermissionClient(builder, "http://permission").roleOf(snippetId, "auth0|beto"))
+    }
+
+    @Test
+    fun `language-service ejecuta el codigo con los inputs`() {
+        server
+            .expect(requestTo("http://language/run"))
+            .andExpect(method(HttpMethod.POST))
+            .andExpect(content().json("""{"code": "x", "language": "printscript", "version": "1.1", "inputs": ["Ana"]}"""))
+            .andRespond(
+                withSuccess(
+                    """{"outputs": ["Hola Ana"], "error": {"rule": "No hay más inputs", "line": 2, "column": 5}}""",
+                    MediaType.APPLICATION_JSON,
+                ),
+            )
+
+        val outcome = LanguageClient(builder, "http://language").run("x", "printscript", "1.1", listOf("Ana"))
+
+        assertEquals(RunOutcome(listOf("Hola Ana"), CodeError("No hay más inputs", 2, 5)), outcome)
+        server.verify()
     }
 }

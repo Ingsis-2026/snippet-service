@@ -46,4 +46,9 @@ class TestCase(
 
 interface TestCaseRepository : JpaRepository<TestCase, UUID> {
     fun findAllBySnippetIdOrderByName(snippetId: UUID): List<TestCase>
+
+    fun findByIdAndSnippetId(
+        id: UUID,
+        snippetId: UUID,
+    ): TestCase?
 }

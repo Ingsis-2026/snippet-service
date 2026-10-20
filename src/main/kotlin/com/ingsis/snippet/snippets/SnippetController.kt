@@ -4,6 +4,7 @@ import jakarta.validation.Valid
 import jakarta.validation.constraints.NotBlank
 import org.springframework.http.HttpStatus
 import org.springframework.http.MediaType
+import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.PutMapping
@@ -72,6 +73,13 @@ class SnippetController(
         @RequestHeader(USER_HEADER) @NotBlank userId: String,
         @Valid @RequestBody request: SnippetRequest,
     ): SnippetResponse = service.create(userId, request.toData()).toResponse()
+
+    /** US6: ver un snippet. Sus tests se piden aparte, en `GET /snippets/{id}/tests`. */
+    @GetMapping("/snippets/{id}")
+    fun get(
+        @PathVariable id: UUID,
+        @RequestHeader(USER_HEADER) @NotBlank userId: String,
+    ): SnippetResponse = service.get(id, userId).toResponse()
 
     /** US2: actualizar un snippet subiendo un archivo. Se mandan todos los datos, cambien o no. */
     @PutMapping("/snippets/{id}", consumes = [MediaType.MULTIPART_FORM_DATA_VALUE])

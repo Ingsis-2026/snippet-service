@@ -42,6 +42,13 @@ class SnippetService(
         return snippet
     }
 
+    /** US6: ver un snippet. Alcanza con que se lo hayan compartido. */
+    @Transactional(readOnly = true)
+    fun get(
+        id: UUID,
+        userId: String,
+    ): Snippet = access.requireReader(id, userId)
+
     /**
      * Reemplaza todos los datos del snippet (US2, US4). Solo puede hacerlo su owner, y el
      * resultado tiene que cumplir las reglas del lenguaje, que puede haber cambiado.
