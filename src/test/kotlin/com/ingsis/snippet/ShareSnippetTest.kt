@@ -7,6 +7,7 @@ import com.ingsis.snippet.clients.Role
 import com.ingsis.snippet.snippets.Snippet
 import com.ingsis.snippet.snippets.SnippetRepository
 import com.ingsis.snippet.snippets.USER_HEADER
+import com.ingsis.snippet.storage.ContentStore
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -30,6 +31,7 @@ import java.util.UUID
 class ShareSnippetTest(
     @Autowired private val mockMvc: MockMvc,
     @Autowired private val repository: SnippetRepository,
+    @Autowired private val contents: ContentStore,
 ) {
     @MockitoBean
     private lateinit var languageClient: LanguageClient
@@ -41,7 +43,7 @@ class ShareSnippetTest(
 
     @BeforeEach
     fun setUp() {
-        snippet = repository.save(Snippet("Saludo", "Imprime un número", "printscript", "1.0", "println(5);", "auth0|ana"))
+        snippet = repository.save(Snippet("Saludo", "Imprime un número", "printscript", "1.0", "auth0|ana"), "println(5);", contents)
         Mockito.`when`(permissionClient.roleOf(snippet.id!!, "auth0|ana")).thenReturn(Role.OWNER)
         Mockito.`when`(permissionClient.roleOf(snippet.id!!, "auth0|beto")).thenReturn(Role.READ)
     }

@@ -29,6 +29,13 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter-webmvc")
     implementation("org.jetbrains.kotlin:kotlin-reflect")
     implementation("tools.jackson.module:jackson-module-kotlin")
+    // El código de cada snippet va a Azure Blob Storage (Azurite en las VMs). Con el HttpClient de
+    // Java y no con Netty, cuya versión la maneja Spring Boot y puede no ser la que espera Azure.
+    implementation(platform("com.azure:azure-sdk-bom:1.3.8"))
+    implementation("com.azure:azure-storage-blob") {
+        exclude(group = "com.azure", module = "azure-core-http-netty")
+    }
+    implementation("com.azure:azure-core-http-jdk-httpclient")
     runtimeOnly("org.postgresql:postgresql")
 
     testImplementation("org.springframework.boot:spring-boot-starter-actuator-test")

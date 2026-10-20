@@ -11,6 +11,7 @@ import com.ingsis.snippet.rules.UserRuleRepository
 import com.ingsis.snippet.snippets.Snippet
 import com.ingsis.snippet.snippets.SnippetRepository
 import com.ingsis.snippet.snippets.USER_HEADER
+import com.ingsis.snippet.storage.ContentStore
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -33,6 +34,7 @@ class LintSnippetTest(
     @Autowired private val snippets: SnippetRepository,
     @Autowired private val rules: UserRuleRepository,
     @Autowired private val ruleService: RuleService,
+    @Autowired private val contents: ContentStore,
 ) {
     @MockitoBean
     private lateinit var languageClient: LanguageClient
@@ -45,7 +47,7 @@ class LintSnippetTest(
 
     @BeforeEach
     fun setUp() {
-        snippet = snippets.save(Snippet("Variable", "Declara una variable", "printscript", "1.0", code, "auth0|ana"))
+        snippet = snippets.save(Snippet("Variable", "Declara una variable", "printscript", "1.0", "auth0|ana"), code, contents)
         Mockito.`when`(permissionClient.roleOf(snippet.id!!, "auth0|ana")).thenReturn(Role.OWNER)
         Mockito.`when`(permissionClient.roleOf(snippet.id!!, "auth0|beto")).thenReturn(Role.READ)
         ruleService.update("auth0|ana", RuleType.LINTING, listOf(RuleChange("identifier_format", true, null)))

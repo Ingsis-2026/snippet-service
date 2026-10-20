@@ -14,6 +14,7 @@ import java.util.UUID
 /** Si el snippet cumple las reglas de lint de su owner (US5). Arranca `PENDING` hasta que se lintee. */
 enum class ValidityStatus { PENDING, COMPLIANT, NOT_COMPLIANT }
 
+/** La metadata de un snippet. Su código se guarda aparte, en el [com.ingsis.snippet.storage.ContentStore]. */
 @Entity
 class Snippet(
     @Column(nullable = false)
@@ -24,8 +25,6 @@ class Snippet(
     var language: String,
     @Column(nullable = false)
     var version: String,
-    @Column(nullable = false, columnDefinition = "text")
-    var content: String,
     @Column(nullable = false)
     val ownerId: String,
     @Enumerated(EnumType.STRING)

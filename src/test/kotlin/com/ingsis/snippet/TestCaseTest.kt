@@ -8,6 +8,7 @@ import com.ingsis.snippet.clients.RunOutcome
 import com.ingsis.snippet.snippets.Snippet
 import com.ingsis.snippet.snippets.SnippetRepository
 import com.ingsis.snippet.snippets.USER_HEADER
+import com.ingsis.snippet.storage.ContentStore
 import com.ingsis.snippet.tests.TestCaseRepository
 import org.hamcrest.Matchers.contains
 import org.junit.jupiter.api.AfterEach
@@ -35,9 +36,12 @@ class TestCaseTest(
     @Autowired private val mockMvc: MockMvc,
     @Autowired private val snippets: SnippetRepository,
     @Autowired private val tests: TestCaseRepository,
+    @Autowired private val contents: ContentStore,
 ) {
     @MockitoBean
     private lateinit var languageClient: LanguageClient
+
+    private val code = "let n: string = readInput(\"?\");"
 
     @MockitoBean
     private lateinit var permissionClient: PermissionClient
@@ -47,9 +51,7 @@ class TestCaseTest(
     @BeforeEach
     fun setUp() {
         snippet =
-            snippets.save(
-                Snippet("Saludo", "Saluda a quien ingrese", "printscript", "1.1", "let n: string = readInput(\"?\");", "auth0|ana"),
-            )
+            snippets.save(Snippet("Saludo", "Saluda a quien ingrese", "printscript", "1.1", "auth0|ana"), code, contents)
         Mockito.`when`(permissionClient.roleOf(snippet.id!!, "auth0|ana")).thenReturn(Role.OWNER)
         Mockito.`when`(permissionClient.roleOf(snippet.id!!, "auth0|beto")).thenReturn(Role.READ)
     }
@@ -182,7 +184,7 @@ class TestCaseTest(
 
     private fun languageServiceAnswers(outcome: RunOutcome) {
         Mockito
-            .`when`(languageClient.run(snippet.content, "printscript", "1.1", listOf("Ana", "Beto")))
+            .`when`(languageClient.run(code, "printscript", "1.1", listOf("Ana", "Beto")))
             .thenReturn(outcome)
     }
 
@@ -251,7 +253,7 @@ class TestCaseTest(
     @Test
     fun `un test de otro snippet no se puede correr desde este`() {
         val testId = createdTestId()
-        val other = snippets.save(Snippet("Otro", "d", "printscript", "1.1", "println(1);", "auth0|ana"))
+        val other = snippets.save(Snippet("Otro", "d", "printscript", "1.1", "auth0|ana"), "println(1);", contents)
         Mockito.`when`(permissionClient.roleOf(other.id!!, "auth0|ana")).thenReturn(Role.OWNER)
 
         runTest(testId, snippetId = other.id!!).andExpect { status { isNotFound() } }

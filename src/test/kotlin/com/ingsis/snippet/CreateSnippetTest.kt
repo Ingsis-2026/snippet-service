@@ -7,6 +7,7 @@ import com.ingsis.snippet.clients.UnsupportedLanguageException
 import com.ingsis.snippet.snippets.SnippetRepository
 import com.ingsis.snippet.snippets.USER_HEADER
 import com.ingsis.snippet.snippets.ValidityStatus
+import com.ingsis.snippet.storage.ContentStore
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import org.mockito.Mockito
@@ -32,6 +33,7 @@ import kotlin.test.assertEquals
 class CreateSnippetTest(
     @Autowired private val mockMvc: MockMvc,
     @Autowired private val repository: SnippetRepository,
+    @Autowired private val contents: ContentStore,
 ) {
     @MockitoBean
     private lateinit var languageClient: LanguageClient
@@ -69,7 +71,7 @@ class CreateSnippetTest(
         }
 
         val saved = repository.findAll().single()
-        assertEquals(code, saved.content)
+        assertEquals(code, contents.load(saved.id!!))
         assertEquals(ValidityStatus.PENDING, saved.status)
         verify(permissionClient).grantOwner(saved.id!!, "auth0|ana")
     }
@@ -167,7 +169,7 @@ class CreateSnippetTest(
         }
 
         val saved = repository.findAll().single()
-        assertEquals(code, saved.content)
+        assertEquals(code, contents.load(saved.id!!))
         verify(permissionClient).grantOwner(saved.id!!, "auth0|ana")
     }
 
