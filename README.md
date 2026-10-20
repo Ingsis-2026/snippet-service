@@ -5,7 +5,7 @@ Parte de **Snippet Searcher** (Ingeniería de Sistemas 2026). Es el servicio al 
 ## De qué es dueño
 
 - **Metadata de cada snippet** (nombre, descripción, lenguaje, versión, owner) en su propio Postgres.
-- **Código de cada snippet**, en Azure Blob Storage: un blob por snippet, que se llama como su id. En local y en las VMs es Azurite, el emulador de Azure Storage.
+- **Código de cada snippet**, en el [asset-service](https://github.com/austral-ingsis/asset-service) de la cátedra: un asset por snippet en el container `snippets`, que se llama como su id. asset-service lo guarda en Azure Blob Storage; en local y en las VMs es Azurite, el emulador de Azure Storage. snippet-service no habla con Azurite.
 - **Tests de cada snippet**: inputs y outputs esperados (US8). Correrlos es trabajo de `language-service`.
 - **Reglas de lint y formato elegidas por cada usuario** (US11, US14). Se le pasan a `language-service` en cada llamada.
 - **Estado de validez de cada snippet** (`PENDING` / `COMPLIANT` / `NOT_COMPLIANT`), persistido, para poder filtrar y ordenar por él (US5).
@@ -42,7 +42,7 @@ Los dos son idempotentes: se usa el estado actual, no el del momento en que se e
 
 ## Correr en local
 
-Necesita su Postgres, Azurite y Redis. Lo más simple es levantarlos desde el repo [`infra`](https://github.com/Ingsis-2026/infra) con `docker compose up -d snippet-db azurite redis`.
+Necesita su Postgres, asset-service (con su Azurite) y Redis. Lo más simple es levantarlos desde el repo [`infra`](https://github.com/Ingsis-2026/infra) con `docker compose up -d snippet-db asset-service redis`.
 
 ```sh
 ./gradlew bootRun   # levanta en :8080
@@ -52,7 +52,7 @@ Necesita su Postgres, Azurite y Redis. Lo más simple es levantarlos desde el re
 |---|---|
 | `DB_HOST` / `DB_PORT` / `DB_NAME` / `DB_USER` / `DB_PASSWORD` | `localhost` / `5432` / `snippet` / `snippet` / `snippet` |
 | `PERMISSION_URL` / `LANGUAGE_URL` | `http://localhost:8081` / `http://localhost:8082` |
-| `BLOB_CONNECTION_STRING` / `BLOB_CONTAINER` | el Azurite de `localhost:10000`, con su cuenta de desarrollo / `snippets` |
+| `ASSET_URL` / `ASSET_CONTAINER` | `http://localhost:8083` / `snippets` |
 | `REDIS_HOST` / `REDIS_PORT` | `localhost` / `6379` |
 | `HOSTNAME` | `snippet-service`. Es el nombre de la réplica en el consumer group; en Docker es el id del container. |
 
@@ -60,7 +60,7 @@ Necesita su Postgres, Azurite y Redis. Lo más simple es levantarlos desde el re
 
 `./gradlew check` corre ktlint, los tests y exige 80% de cobertura. Lo único excluido de la cobertura es el `main()` de Spring.
 
-Los tests no necesitan Docker: en vez de Azurite usan un store en memoria (`InMemoryContentStore`), y en vez de los streams de Redis unas colas en memoria (`RecordingLintQueue`, `RecordingFormatQueue`) que no procesan nada hasta que el test lo pide. El worker de Redis se prueba con Redis simulado (`RedisStreamsTest`).
+Los tests no necesitan Docker: en vez de asset-service usan un store en memoria (`InMemoryContentStore`), y en vez de los streams de Redis unas colas en memoria (`RecordingLintQueue`, `RecordingFormatQueue`) que no procesan nada hasta que el test lo pide. El worker de Redis se prueba con Redis simulado (`RedisStreamsTest`).
 
 ## CI/CD
 

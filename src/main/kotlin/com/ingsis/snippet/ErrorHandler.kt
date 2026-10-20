@@ -47,7 +47,7 @@ class ErrorHandler {
     @ExceptionHandler(AlreadyHasAccessException::class)
     fun conflict(e: RuntimeException): ProblemDetail = ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, e.message)
 
-    /** Otro servicio, o Azurite, no respondió o respondió con un error que no esperábamos. */
+    /** Otro servicio, o asset-service al guardar o leer el código, no respondió o respondió con un error que no esperábamos. */
     @ExceptionHandler(RestClientException::class, StorageException::class)
     fun downstreamFailure(e: RuntimeException): ProblemDetail =
         ProblemDetail.forStatusAndDetail(HttpStatus.BAD_GATEWAY, "Falló un servicio interno")
