@@ -129,14 +129,17 @@ class SnippetService(
     ): SnippetFile {
         val snippet = access.requireReader(id, userId)
         val original = contents.load(id)
-        val content =
-            if (formatted) {
-                val rules = ruleService.configOf(snippet.ownerId, RuleType.FORMATTING)
-                languageClient.format(original, snippet.language, snippet.version, rules)
-            } else {
-                original
-            }
+        val content = if (formatted) formatted(snippet, original) else original
         return SnippetFile("${snippet.name}.${extensionOf(snippet.language)}", content)
+    }
+
+    /** [code] con las reglas de formato del owner de [snippet] aplicadas (US12, US13). */
+    fun formatted(
+        snippet: Snippet,
+        code: String,
+    ): String {
+        val rules = ruleService.configOf(snippet.ownerId, RuleType.FORMATTING)
+        return languageClient.format(code, snippet.language, snippet.version, rules)
     }
 
     /** La extensión que se espera para un lenguaje; texto plano si no se la conoce. */
