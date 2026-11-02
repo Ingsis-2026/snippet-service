@@ -10,8 +10,8 @@ import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 
 /**
- * Reemplaza a Azurite en los tests, para que no necesiten Docker. Spring lo levanta solo porque
- * está en el paquete de la aplicación, y le gana a [com.ingsis.snippet.storage.BlobContentStore]
+ * Reemplaza a asset-service en los tests, para que no necesiten Docker. Spring lo levanta solo porque
+ * está en el paquete de la aplicación, y le gana a [com.ingsis.snippet.storage.AssetServiceContentStore]
  * por ser `@Primary`.
  */
 @Primary
@@ -26,7 +26,7 @@ class InMemoryContentStore : ContentStore {
         contents[id] = content
     }
 
-    /** Falla igual que [com.ingsis.snippet.storage.BlobContentStore] cuando el código no está. */
+    /** Falla igual que [com.ingsis.snippet.storage.AssetServiceContentStore] cuando el código no está. */
     override fun load(id: UUID): String =
         contents[id] ?: throw StorageException("No se pudo leer el código del snippet $id", NoSuchElementException())
 }
