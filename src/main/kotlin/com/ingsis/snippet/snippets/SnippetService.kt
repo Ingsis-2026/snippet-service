@@ -6,11 +6,16 @@ import com.ingsis.snippet.clients.PermissionClient
 import com.ingsis.snippet.rules.RuleService
 import com.ingsis.snippet.rules.RuleType
 import com.ingsis.snippet.storage.ContentStore
+import com.ingsis.snippet.storage.StorageException
+import org.slf4j.Logger
+import org.slf4j.LoggerFactory
 import org.springframework.context.ApplicationEventPublisher
 import org.springframework.data.domain.Page
 import org.springframework.data.domain.Pageable
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
+import org.springframework.transaction.event.TransactionPhase
+import org.springframework.transaction.event.TransactionalEventListener
 import java.util.UUID
 
 /** Todo lo que el usuario provee de un snippet, tanto al crearlo como al actualizarlo. */
@@ -37,6 +42,14 @@ data class SnippetCreatedEvent(
 data class SnippetUpdatedEvent(
     val snippet: Snippet,
     val content: String,
+)
+
+/**
+ * Se está borrando un snippet. Se publica dentro del borrado, antes de borrar el snippet, para que
+ * lo que depende de él (sus tests) se borre en la misma transacción.
+ */
+data class SnippetDeletedEvent(
+    val snippetId: UUID,
 )
 
 data class SnippetFile(
@@ -142,6 +155,18 @@ class SnippetService(
         return languageClient.format(code, snippet.language, snippet.version, rules)
     }
 
+    /**
+     * Formatear el código del editor sin guardarlo, para verlo antes de decidir si se guarda. Es
+     * el código que llega y no el guardado, pero con el lenguaje y la versión del snippet y las
+     * reglas de su owner, como al descargarlo formateado (US13). Alcanza con poder verlo.
+     */
+    @Transactional(readOnly = true)
+    fun format(
+        id: UUID,
+        userId: String,
+        code: String,
+    ): String = formatted(access.requireReader(id, userId), code)
+
     /** La extensión que se espera para un lenguaje; texto plano si no se la conoce. */
     private fun extensionOf(language: String) = if (language.equals("printscript", ignoreCase = true)) "ps" else "txt"
 
@@ -189,11 +214,47 @@ class SnippetService(
         return SnippetWithContent(saved, data.content)
     }
 
+    /**
+     * Solo el owner borra un snippet, y con él se van sus tests, sus permisos y su código.
+     *
+     * Los tests y el snippet se borran en la base antes de llamar a permission-service: si ese
+     * llamado falla, se deshace todo y el snippet queda como estaba. En el orden inverso, si
+     * fallara la base quedaría un snippet sin permisos, que nadie vería, ni su owner para volver
+     * a borrarlo.
+     *
+     * El código se borra recién cuando quedó todo borrado, y si falla solo se loguea: queda un
+     * asset que nadie lee, pero el snippet ya no existe.
+     */
+    @Transactional
+    fun delete(
+        id: UUID,
+        userId: String,
+    ) {
+        access.requireOwner(id, userId)
+        events.publishEvent(SnippetDeletedEvent(id))
+        repository.deleteById(id)
+        repository.flush()
+        permissionClient.revokeAll(id)
+    }
+
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
+    fun deleteContent(event: SnippetDeletedEvent) {
+        try {
+            contents.delete(event.snippetId)
+        } catch (e: StorageException) {
+            log.warn("Se borró el snippet ${event.snippetId} pero no su código", e)
+        }
+    }
+
     private fun withContent(snippet: Snippet) = SnippetWithContent(snippet, contents.load(snippet.id!!))
 
     private fun validate(data: SnippetData) {
         val errors = languageClient.validate(data.content, data.language, data.version)
         if (errors.isNotEmpty()) throw InvalidSnippetException(errors)
+    }
+
+    private companion object {
+        val log: Logger = LoggerFactory.getLogger(SnippetService::class.java)
     }
 }
 

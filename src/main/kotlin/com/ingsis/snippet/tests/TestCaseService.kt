@@ -4,10 +4,12 @@ import com.ingsis.snippet.clients.CodeError
 import com.ingsis.snippet.clients.LanguageClient
 import com.ingsis.snippet.clients.RunOutcome
 import com.ingsis.snippet.snippets.SnippetAccess
+import com.ingsis.snippet.snippets.SnippetDeletedEvent
 import com.ingsis.snippet.snippets.SnippetUpdatedEvent
 import com.ingsis.snippet.storage.ContentStore
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
+import org.springframework.context.event.EventListener
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Propagation
 import org.springframework.transaction.annotation.Transactional
@@ -90,10 +92,53 @@ class TestCaseService(
         userId: String,
     ): TestRunResponse {
         val snippet = access.requireReader(snippetId, userId)
-        val test = repository.findByIdAndSnippetId(testId, snippetId) ?: throw TestCaseNotFoundException(testId)
+        val test = find(testId, snippetId)
         val outcome = languageClient.run(contents.load(snippetId), snippet.language, snippet.version, test.inputs.toList())
         val passed = test.record(outcome)
         return TestRunResponse(passed, test.outputs.toList(), outcome.outputs, outcome.error)
+    }
+
+    /**
+     * Solo el owner edita un test, y se reemplazan todos sus datos, igual que al actualizar un
+     * snippet. Vuelve a `PENDING`: el resultado que tenía era de los inputs y outputs anteriores.
+     */
+    @Transactional
+    fun update(
+        snippetId: UUID,
+        testId: UUID,
+        userId: String,
+        data: TestCaseData,
+    ): TestCaseResponse {
+        access.requireOwner(snippetId, userId)
+        val test = find(testId, snippetId)
+        test.name = data.name
+        test.inputs.apply {
+            clear()
+            addAll(data.inputs)
+        }
+        test.outputs.apply {
+            clear()
+            addAll(data.outputs)
+        }
+        test.status = TestStatus.PENDING
+        return test.toResponse()
+    }
+
+    /** Solo el owner borra un test. */
+    @Transactional
+    fun delete(
+        snippetId: UUID,
+        testId: UUID,
+        userId: String,
+    ) {
+        access.requireOwner(snippetId, userId)
+        repository.delete(find(testId, snippetId))
+    }
+
+    /** Los tests se borran con su snippet, en la misma transacción que lo borra. */
+    @EventListener
+    fun deleteAll(event: SnippetDeletedEvent) {
+        repository.deleteAll(repository.findAllBySnippetId(event.snippetId))
     }
 
     /**
@@ -124,6 +169,12 @@ class TestCaseService(
         status = if (passed) TestStatus.PASSED else TestStatus.FAILED
         return passed
     }
+
+    /** Un test que existe pero es de otro snippet tampoco está en este. */
+    private fun find(
+        testId: UUID,
+        snippetId: UUID,
+    ): TestCase = repository.findByIdAndSnippetId(testId, snippetId) ?: throw TestCaseNotFoundException(testId)
 
     private fun TestCase.toResponse() = TestCaseResponse(id!!, name, inputs.toList(), outputs.toList(), status)
 
