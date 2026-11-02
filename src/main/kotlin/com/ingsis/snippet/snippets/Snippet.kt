@@ -9,6 +9,9 @@ import jakarta.persistence.GenerationType
 import jakarta.persistence.Id
 import org.springframework.data.jpa.repository.JpaRepository
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor
+import org.springframework.data.jpa.repository.Modifying
+import org.springframework.data.jpa.repository.Query
+import org.springframework.transaction.annotation.Transactional
 import java.util.UUID
 
 /** Si el snippet cumple las reglas de lint de su owner (US5). Arranca `PENDING` hasta que se lintee. */
@@ -37,4 +40,25 @@ class Snippet(
 
 interface SnippetRepository :
     JpaRepository<Snippet, UUID>,
-    JpaSpecificationExecutor<Snippet>
+    JpaSpecificationExecutor<Snippet> {
+    @Query("select s.id from Snippet s where s.ownerId = :ownerId")
+    fun findIdsByOwnerId(ownerId: String): List<UUID>
+
+    /** Todos los snippets del owner vuelven a `PENDING` hasta que se los lintee con sus reglas nuevas (US15). */
+    @Transactional
+    @Modifying
+    @Query("update Snippet s set s.status = com.ingsis.snippet.snippets.ValidityStatus.PENDING where s.ownerId = :ownerId")
+    fun markPendingByOwner(ownerId: String): Int
+
+    /**
+     * Cambia solo el estado. Guardar la entidad entera pisaría con datos viejos un update del
+     * snippet que haya entrado mientras se lo linteaba.
+     */
+    @Transactional
+    @Modifying
+    @Query("update Snippet s set s.status = :status where s.id = :id")
+    fun updateStatus(
+        id: UUID,
+        status: ValidityStatus,
+    ): Int
+}
