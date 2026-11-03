@@ -124,8 +124,22 @@ class SnippetService(
         userId: String,
     ): List<CodeError> = errorsOf(access.requireReader(id, userId))
 
+    /**
+     * Si el snippet sigue siendo válido para su parser y, si lo es, si cumple las reglas de lint de
+     * su owner, con su código tal como está ahora (US5, US15). Se valida antes de lintear para
+     * distinguir un snippet que el parser actual ya no acepta (`INVALID`) de uno que incumple una
+     * regla: el linteo informa el error de sintaxis como una regla incumplida más.
+     */
+    fun statusOf(snippet: Snippet): ValidityStatus {
+        val code = contents.load(snippet.id!!)
+        if (languageClient.validate(code, snippet.language, snippet.version).isNotEmpty()) return ValidityStatus.INVALID
+        val rules = ruleService.configOf(snippet.ownerId, RuleType.LINTING)
+        val errors = languageClient.lint(code, snippet.language, snippet.version, rules)
+        return if (errors.isEmpty()) ValidityStatus.COMPLIANT else ValidityStatus.NOT_COMPLIANT
+    }
+
     /** Las reglas de lint de su owner que el snippet no cumple, con su código tal como está ahora. */
-    fun errorsOf(snippet: Snippet): List<CodeError> {
+    private fun errorsOf(snippet: Snippet): List<CodeError> {
         val rules = ruleService.configOf(snippet.ownerId, RuleType.LINTING)
         return languageClient.lint(contents.load(snippet.id!!), snippet.language, snippet.version, rules)
     }

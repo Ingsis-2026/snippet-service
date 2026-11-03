@@ -8,7 +8,7 @@ Parte de **Snippet Searcher** (Ingeniería de Sistemas 2026). Es el servicio al 
 - **Código de cada snippet**, en el [asset-service](https://github.com/austral-ingsis/asset-service) de la cátedra: un asset por snippet en el container `snippets`, que se llama como su id. asset-service lo guarda en Azure Blob Storage; en local y en las VMs es Azurite, el emulador de Azure Storage. snippet-service no habla con Azurite.
 - **Tests de cada snippet**: inputs y outputs esperados (US8). Correrlos es trabajo de `language-service`.
 - **Reglas de lint y formato elegidas por cada usuario** (US11, US14). Se le pasan a `language-service` en cada llamada.
-- **Estado de validez de cada snippet** (`PENDING` / `COMPLIANT` / `NOT_COMPLIANT`), persistido, para poder filtrar y ordenar por él (US5).
+- **Estado de validez de cada snippet** (`PENDING` / `COMPLIANT` / `NOT_COMPLIANT` / `INVALID`), persistido, para poder filtrar y ordenar por él (US5).
 - **Las colas de snippets a lintear (US15) y a formatear (US12)**, en streams de Redis. Ver [Linteo y formateo automáticos](#linteo-y-formateo-automáticos).
 
 ## De qué no es dueño
@@ -39,6 +39,17 @@ Lo mismo pasa al crear o actualizar un snippet: se encola para lintearlo.
 **Tolerancia a fallos.** Un mensaje que falla, o que quedó a medias porque se cayó el servicio, sigue pendiente en Redis. Pasado `streams.retry-after` (1 minuto) lo retoma cualquier réplica (`XCLAIM`). Después de `streams.max-attempts` entregas (3) se saltea: se confirma sin procesar para no frenar al resto. Un snippet que no se pudo lintear queda `PENDING`; uno que no se pudo formatear queda con el código que tenía.
 
 Los dos son idempotentes: se usa el estado actual, no el del momento en que se encoló, y formatear código ya formateado no lo cambia. Por eso da igual que un snippet se procese dos veces o en otro orden. Si se corta entre guardar el código formateado y encolarlo para lintear, el reintento lo encola igual, porque el snippet ya quedó `PENDING`.
+
+## Versión nueva del parser
+
+"Con cada versión nueva del parser del lenguaje, se deberán re-evaluar y validar todos los snippets."
+
+1. Al arrancar (después de `parser.initial-delay`, 30 s) y cada `parser.check-interval` (5 minutos), snippet-service le pregunta a language-service con qué versión de la librería de PrintScript corre (`GET /version`).
+2. Si no es la última con la que se validó, que queda guardada en la tabla `parser_version`, todos los snippets pasan a `PENDING` y se encolan en `lint-requests`.
+3. El worker de linteo valida cada snippet antes de lintearlo: si el parser actual no lo acepta queda `INVALID`; si lo acepta, `COMPLIANT` o `NOT_COMPLIANT` como siempre.
+4. Recién cuando quedaron todos encolados se guarda la versión nueva. Si algo falla antes, la próxima vuelta lo hace de nuevo: encolar dos veces no cambia nada, porque lintear es idempotente.
+
+La primera vez que corre no hay versión guardada, así que se validan todos los snippets que ya estaban.
 
 ## Correr en local
 
