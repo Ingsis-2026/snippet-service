@@ -15,7 +15,7 @@ spring:
     oauth2:
       resourceserver:
         jwt:
-          issuer-uri: https://${AUTH0_DOMAIN:dev-2fvmkxju8g70kqvs.us.auth0.com}/
+          issuer-uri: https://${auth0.domain}/
           audiences: ${AUTH0_AUDIENCE:https://snippet-searcher/api}
   # Las colas de snippets a lintear (US15) y a formatear (US12) son streams de Redis.
   data:
@@ -32,6 +32,14 @@ services:
 # El container de asset-service donde va el código, un asset por snippet.
 storage:
   container: ${ASSET_CONTAINER:snippets}
+
+auth0:
+  domain: ${AUTH0_DOMAIN:dev-2fvmkxju8g70kqvs.us.auth0.com}
+  # La aplicación machine-to-machine con la que se buscan usuarios para compartir (US7), con
+  # read:users en la Management API. El secret no tiene default: va solo en el entorno.
+  management:
+    client-id: ${AUTH0_M2M_CLIENT_ID:}
+    client-secret: ${AUTH0_M2M_CLIENT_SECRET:}
 
 # Origins de otros dominios que pueden llamar a la API desde el navegador, separados por comas.
 cors:
