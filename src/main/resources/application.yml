@@ -25,6 +25,10 @@ services:
 storage:
   container: ${ASSET_CONTAINER:snippets}
 
+# Origins de otros dominios que pueden llamar a la API desde el navegador, separados por comas.
+cors:
+  allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173}
+
 # Cada réplica lee los streams con su propio nombre de consumer: en Docker, HOSTNAME es el id del container.
 streams:
   consumer: ${HOSTNAME:snippet-service}
