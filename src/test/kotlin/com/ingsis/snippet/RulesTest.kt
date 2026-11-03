@@ -5,7 +5,6 @@ import com.ingsis.snippet.clients.PermissionClient
 import com.ingsis.snippet.rules.RuleService
 import com.ingsis.snippet.rules.RuleType
 import com.ingsis.snippet.rules.UserRuleRepository
-import com.ingsis.snippet.snippets.USER_HEADER
 import org.hamcrest.Matchers.equalTo
 import org.hamcrest.Matchers.everyItem
 import org.junit.jupiter.api.AfterEach
@@ -42,14 +41,14 @@ class RulesTest(
     private fun get(
         type: String,
         user: String = "auth0|ana",
-    ) = mockMvc.get("/rules/$type") { header(USER_HEADER, user) }
+    ) = mockMvc.get("/rules/$type") { with(asUser(user)) }
 
     private fun put(
         type: String,
         body: String,
         user: String = "auth0|ana",
     ) = mockMvc.put("/rules/$type") {
-        header(USER_HEADER, user)
+        with(asUser(user))
         contentType = MediaType.APPLICATION_JSON
         content = body
     }

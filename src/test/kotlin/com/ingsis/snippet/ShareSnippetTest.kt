@@ -6,7 +6,6 @@ import com.ingsis.snippet.clients.PermissionClient
 import com.ingsis.snippet.clients.Role
 import com.ingsis.snippet.snippets.Snippet
 import com.ingsis.snippet.snippets.SnippetRepository
-import com.ingsis.snippet.snippets.USER_HEADER
 import com.ingsis.snippet.storage.ContentStore
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
@@ -56,7 +55,7 @@ class ShareSnippetTest(
         user: String = "auth0|ana",
         id: UUID = snippet.id!!,
     ) = mockMvc.post("/snippets/$id/share") {
-        header(USER_HEADER, user)
+        with(asUser(user))
         contentType = MediaType.APPLICATION_JSON
         content = """{"userId": "$with"}"""
     }

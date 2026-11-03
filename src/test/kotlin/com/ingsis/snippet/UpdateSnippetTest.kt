@@ -6,7 +6,6 @@ import com.ingsis.snippet.clients.PermissionClient
 import com.ingsis.snippet.clients.Role
 import com.ingsis.snippet.snippets.Snippet
 import com.ingsis.snippet.snippets.SnippetRepository
-import com.ingsis.snippet.snippets.USER_HEADER
 import com.ingsis.snippet.snippets.ValidityStatus
 import com.ingsis.snippet.storage.ContentStore
 import org.junit.jupiter.api.AfterEach
@@ -74,14 +73,14 @@ class UpdateSnippetTest(
         param("description", "Imprime otro número")
         param("language", "printscript")
         param("version", "1.1")
-        header(USER_HEADER, user)
+        with(asUser(user))
     }
 
     private fun editorUpdate(
         user: String = "auth0|ana",
         content: String = updated,
     ) = mockMvc.put("/snippets/${snippet.id}") {
-        header(USER_HEADER, user)
+        with(asUser(user))
         contentType = MediaType.APPLICATION_JSON
         this.content =
             """{"name": "Saludo v2", "description": "Imprime otro número", "language": "printscript", "version": "1.1",

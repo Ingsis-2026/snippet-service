@@ -1,13 +1,12 @@
 package com.ingsis.snippet.rules
 
 import com.fasterxml.jackson.annotation.JsonProperty
-import com.ingsis.snippet.snippets.USER_HEADER
+import com.ingsis.snippet.CurrentUser
 import jakarta.validation.Valid
 import jakarta.validation.constraints.NotBlank
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PutMapping
 import org.springframework.web.bind.annotation.RequestBody
-import org.springframework.web.bind.annotation.RequestHeader
 import org.springframework.web.bind.annotation.RestController
 
 /** Una regla como la ve el usuario. [value] es `null` en las que no llevan valor. */
@@ -36,23 +35,23 @@ class RuleController(
 ) {
     @GetMapping("/rules/formatting")
     fun formatting(
-        @RequestHeader(USER_HEADER) @NotBlank userId: String,
+        @CurrentUser userId: String,
     ): List<RuleResponse> = service.rulesOf(userId, RuleType.FORMATTING).map { it.toResponse() }
 
     @PutMapping("/rules/formatting")
     fun updateFormatting(
-        @RequestHeader(USER_HEADER) @NotBlank userId: String,
+        @CurrentUser userId: String,
         @Valid @RequestBody rules: List<RuleRequest>,
     ): List<RuleResponse> = service.update(userId, RuleType.FORMATTING, rules.map { it.toChange() }).map { it.toResponse() }
 
     @GetMapping("/rules/linting")
     fun linting(
-        @RequestHeader(USER_HEADER) @NotBlank userId: String,
+        @CurrentUser userId: String,
     ): List<RuleResponse> = service.rulesOf(userId, RuleType.LINTING).map { it.toResponse() }
 
     @PutMapping("/rules/linting")
     fun updateLinting(
-        @RequestHeader(USER_HEADER) @NotBlank userId: String,
+        @CurrentUser userId: String,
         @Valid @RequestBody rules: List<RuleRequest>,
     ): List<RuleResponse> = service.update(userId, RuleType.LINTING, rules.map { it.toChange() }).map { it.toResponse() }
 

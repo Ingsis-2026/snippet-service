@@ -1,6 +1,6 @@
 package com.ingsis.snippet.tests
 
-import com.ingsis.snippet.snippets.USER_HEADER
+import com.ingsis.snippet.CurrentUser
 import jakarta.validation.Valid
 import jakarta.validation.constraints.NotBlank
 import org.springframework.http.HttpStatus
@@ -10,7 +10,6 @@ import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.PutMapping
 import org.springframework.web.bind.annotation.RequestBody
-import org.springframework.web.bind.annotation.RequestHeader
 import org.springframework.web.bind.annotation.ResponseStatus
 import org.springframework.web.bind.annotation.RestController
 import java.util.UUID
@@ -33,7 +32,7 @@ class TestCaseController(
     @ResponseStatus(HttpStatus.CREATED)
     fun create(
         @PathVariable snippetId: UUID,
-        @RequestHeader(USER_HEADER) @NotBlank userId: String,
+        @CurrentUser userId: String,
         @Valid @RequestBody request: TestCaseRequest,
     ): TestCaseResponse = service.create(snippetId, userId, request.toData())
 
@@ -42,7 +41,7 @@ class TestCaseController(
     fun run(
         @PathVariable snippetId: UUID,
         @PathVariable testId: UUID,
-        @RequestHeader(USER_HEADER) @NotBlank userId: String,
+        @CurrentUser userId: String,
     ): TestRunResponse = service.run(snippetId, testId, userId)
 
     /** Editar un test de un snippet propio. Se mandan todos sus datos, cambien o no. */
@@ -50,7 +49,7 @@ class TestCaseController(
     fun update(
         @PathVariable snippetId: UUID,
         @PathVariable testId: UUID,
-        @RequestHeader(USER_HEADER) @NotBlank userId: String,
+        @CurrentUser userId: String,
         @Valid @RequestBody request: TestCaseRequest,
     ): TestCaseResponse = service.update(snippetId, testId, userId, request.toData())
 
@@ -59,12 +58,12 @@ class TestCaseController(
     fun delete(
         @PathVariable snippetId: UUID,
         @PathVariable testId: UUID,
-        @RequestHeader(USER_HEADER) @NotBlank userId: String,
+        @CurrentUser userId: String,
     ) = service.delete(snippetId, testId, userId)
 
     @GetMapping("/snippets/{snippetId}/tests")
     fun list(
         @PathVariable snippetId: UUID,
-        @RequestHeader(USER_HEADER) @NotBlank userId: String,
+        @CurrentUser userId: String,
     ): List<TestCaseResponse> = service.list(snippetId, userId)
 }

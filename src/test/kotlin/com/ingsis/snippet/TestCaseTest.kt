@@ -7,7 +7,6 @@ import com.ingsis.snippet.clients.Role
 import com.ingsis.snippet.clients.RunOutcome
 import com.ingsis.snippet.snippets.Snippet
 import com.ingsis.snippet.snippets.SnippetRepository
-import com.ingsis.snippet.snippets.USER_HEADER
 import com.ingsis.snippet.storage.ContentStore
 import com.ingsis.snippet.tests.TestCaseRepository
 import com.ingsis.snippet.tests.TestStatus
@@ -70,12 +69,12 @@ class TestCaseTest(
         user: String = "auth0|ana",
         snippetId: UUID = snippet.id!!,
     ) = mockMvc.post("/snippets/$snippetId/tests") {
-        header(USER_HEADER, user)
+        with(asUser(user))
         contentType = MediaType.APPLICATION_JSON
         content = body
     }
 
-    private fun list(user: String) = mockMvc.get("/snippets/${snippet.id}/tests") { header(USER_HEADER, user) }
+    private fun list(user: String) = mockMvc.get("/snippets/${snippet.id}/tests") { with(asUser(user)) }
 
     private val greeting = """{"name": "Saluda a dos", "inputs": ["Ana", "Beto"], "outputs": ["Hola Ana", "Hola Beto", "Chau"]}"""
 
@@ -183,7 +182,7 @@ class TestCaseTest(
         testId: String,
         user: String = "auth0|ana",
         snippetId: UUID = snippet.id!!,
-    ) = mockMvc.post("/snippets/$snippetId/tests/$testId/run") { header(USER_HEADER, user) }
+    ) = mockMvc.post("/snippets/$snippetId/tests/$testId/run") { with(asUser(user)) }
 
     private fun languageServiceAnswers(outcome: RunOutcome) {
         Mockito
@@ -260,7 +259,7 @@ class TestCaseTest(
         body: String,
         user: String = "auth0|ana",
     ) = mockMvc.put("/snippets/${snippet.id}/tests/$testId") {
-        header(USER_HEADER, user)
+        with(asUser(user))
         contentType = MediaType.APPLICATION_JSON
         content = body
     }
@@ -269,7 +268,7 @@ class TestCaseTest(
         testId: String,
         user: String = "auth0|ana",
         snippetId: UUID = snippet.id!!,
-    ) = mockMvc.delete("/snippets/$snippetId/tests/$testId") { header(USER_HEADER, user) }
+    ) = mockMvc.delete("/snippets/$snippetId/tests/$testId") { with(asUser(user)) }
 
     @Test
     fun `el owner edita un test y se reemplazan todos sus datos`() {
