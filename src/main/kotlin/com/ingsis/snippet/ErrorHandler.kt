@@ -13,6 +13,7 @@ import com.ingsis.snippet.snippets.NotOwnerException
 import com.ingsis.snippet.snippets.SnippetNotFoundException
 import com.ingsis.snippet.storage.StorageException
 import com.ingsis.snippet.tests.TestCaseNotFoundException
+import com.ingsis.snippet.users.UsersUnavailableException
 import org.springframework.http.HttpStatus
 import org.springframework.http.ProblemDetail
 import org.springframework.web.bind.annotation.ExceptionHandler
@@ -51,4 +52,9 @@ class ErrorHandler {
     @ExceptionHandler(RestClientException::class, StorageException::class)
     fun downstreamFailure(e: RuntimeException): ProblemDetail =
         ProblemDetail.forStatusAndDetail(HttpStatus.BAD_GATEWAY, "Falló un servicio interno")
+
+    /** US7: Auth0 no respondió, o falta configurar la aplicación con la que se buscan usuarios. */
+    @ExceptionHandler(UsersUnavailableException::class)
+    fun usersUnavailable(e: UsersUnavailableException): ProblemDetail =
+        ProblemDetail.forStatusAndDetail(HttpStatus.SERVICE_UNAVAILABLE, e.message)
 }
