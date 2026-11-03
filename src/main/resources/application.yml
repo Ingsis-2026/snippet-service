@@ -9,6 +9,14 @@ spring:
     open-in-view: false
     hibernate:
       ddl-auto: ${DDL_AUTO:update}
+  # Los access tokens los emite Auth0. Los defaults son el tenant de desarrollo y el identifier de
+  # esta API en Auth0; ninguno de los dos es secreto.
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: https://${AUTH0_DOMAIN:dev-2fvmkxju8g70kqvs.us.auth0.com}/
+          audiences: ${AUTH0_AUDIENCE:https://snippet-searcher/api}
   # Las colas de snippets a lintear (US15) y a formatear (US12) son streams de Redis.
   data:
     redis:

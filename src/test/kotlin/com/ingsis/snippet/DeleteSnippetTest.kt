@@ -5,7 +5,6 @@ import com.ingsis.snippet.clients.PermissionClient
 import com.ingsis.snippet.clients.Role
 import com.ingsis.snippet.snippets.Snippet
 import com.ingsis.snippet.snippets.SnippetRepository
-import com.ingsis.snippet.snippets.USER_HEADER
 import com.ingsis.snippet.storage.StorageException
 import com.ingsis.snippet.tests.TestCase
 import com.ingsis.snippet.tests.TestCaseRepository
@@ -68,7 +67,7 @@ class DeleteSnippetTest(
     private fun delete(
         user: String = "auth0|ana",
         id: UUID = snippet.id!!,
-    ) = mockMvc.delete("/snippets/$id") { header(USER_HEADER, user) }
+    ) = mockMvc.delete("/snippets/$id") { with(asUser(user)) }
 
     @Test
     fun `el owner borra el snippet con sus tests, sus permisos y su codigo`() {

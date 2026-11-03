@@ -55,6 +55,7 @@ Necesita su Postgres, asset-service (con su Azurite) y Redis. Lo más simple es 
 | `ASSET_URL` / `ASSET_CONTAINER` | `http://localhost:8083` / `snippets` |
 | `REDIS_HOST` / `REDIS_PORT` | `localhost` / `6379` |
 | `HOSTNAME` | `snippet-service`. Es el nombre de la réplica en el consumer group; en Docker es el id del container. |
+| `AUTH0_DOMAIN` / `AUTH0_AUDIENCE` | `dev-2fvmkxju8g70kqvs.us.auth0.com` / `https://snippet-searcher/api`. El tenant de Auth0 que emite los access tokens y el identifier de esta API en ese tenant. No son secretos. |
 | `CORS_ALLOWED_ORIGINS` | `http://localhost:5173`. Origins de otros dominios que pueden llamar a la API desde el navegador, separados por comas. La UI desplegada no lo necesita: llama a `/api` en su mismo dominio. |
 
 ## Calidad

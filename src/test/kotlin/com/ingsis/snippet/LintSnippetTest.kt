@@ -10,7 +10,6 @@ import com.ingsis.snippet.rules.RuleType
 import com.ingsis.snippet.rules.UserRuleRepository
 import com.ingsis.snippet.snippets.Snippet
 import com.ingsis.snippet.snippets.SnippetRepository
-import com.ingsis.snippet.snippets.USER_HEADER
 import com.ingsis.snippet.storage.ContentStore
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
@@ -59,7 +58,7 @@ class LintSnippetTest(
         rules.deleteAll()
     }
 
-    private fun lint(user: String) = mockMvc.get("/snippets/${snippet.id}/lint") { header(USER_HEADER, user) }
+    private fun lint(user: String) = mockMvc.get("/snippets/${snippet.id}/lint") { with(asUser(user)) }
 
     @Test
     fun `informa las reglas del owner que el snippet no cumple`() {

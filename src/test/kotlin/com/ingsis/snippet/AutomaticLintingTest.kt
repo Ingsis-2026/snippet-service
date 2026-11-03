@@ -8,7 +8,6 @@ import com.ingsis.snippet.linting.SnippetLinter
 import com.ingsis.snippet.rules.UserRuleRepository
 import com.ingsis.snippet.snippets.Snippet
 import com.ingsis.snippet.snippets.SnippetRepository
-import com.ingsis.snippet.snippets.USER_HEADER
 import com.ingsis.snippet.snippets.ValidityStatus
 import com.ingsis.snippet.storage.ContentStore
 import org.junit.jupiter.api.AfterEach
@@ -88,7 +87,7 @@ class AutomaticLintingTest(
 
     private fun changeLintingRules(body: String = """[{"name": "identifier_format", "isActive": true, "value": "snake case"}]""") =
         mockMvc.put("/rules/linting") {
-            header(USER_HEADER, "auth0|ana")
+            with(asUser("auth0|ana"))
             contentType = MediaType.APPLICATION_JSON
             content = body
         }
@@ -131,7 +130,7 @@ class AutomaticLintingTest(
         queue.processAll()
 
         mockMvc
-            .get("/snippets?status=NOT_COMPLIANT") { header(USER_HEADER, "auth0|ana") }
+            .get("/snippets?status=NOT_COMPLIANT") { with(asUser("auth0|ana")) }
             .andExpect {
                 jsonPath("$.content.length()") { value(1) }
                 jsonPath("$.content[0].name") { value("Camel") }
@@ -142,7 +141,7 @@ class AutomaticLintingTest(
     fun `cambiar reglas de formato no relintea nada`() {
         mockMvc
             .put("/rules/formatting") {
-                header(USER_HEADER, "auth0|ana")
+                with(asUser("auth0|ana"))
                 contentType = MediaType.APPLICATION_JSON
                 content = """[{"name": "indent-inside-if", "isActive": true, "value": "2"}]"""
             }.andExpect { status { isOk() } }
@@ -184,7 +183,7 @@ class AutomaticLintingTest(
 
         mockMvc
             .post("/snippets") {
-                header(USER_HEADER, "auth0|ana")
+                with(asUser("auth0|ana"))
                 contentType = MediaType.APPLICATION_JSON
                 content =
                     """{"name": "Nuevo", "description": "Uno nuevo", "language": "printscript", "version": "1.1",
@@ -204,7 +203,7 @@ class AutomaticLintingTest(
 
         mockMvc
             .put("/snippets/${camelSnippet.id}") {
-                header(USER_HEADER, "auth0|ana")
+                with(asUser("auth0|ana"))
                 contentType = MediaType.APPLICATION_JSON
                 content =
                     """{"name": "Camel", "description": "Ahora snake", "language": "printscript", "version": "1.1",

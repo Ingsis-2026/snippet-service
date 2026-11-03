@@ -5,7 +5,6 @@ import com.ingsis.snippet.clients.PermissionClient
 import com.ingsis.snippet.clients.Role
 import com.ingsis.snippet.snippets.Snippet
 import com.ingsis.snippet.snippets.SnippetRepository
-import com.ingsis.snippet.snippets.USER_HEADER
 import com.ingsis.snippet.storage.ContentStore
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
@@ -51,7 +50,7 @@ class ViewSnippetTest(
     private fun view(
         user: String,
         id: UUID = snippet.id!!,
-    ) = mockMvc.get("/snippets/$id") { header(USER_HEADER, user) }
+    ) = mockMvc.get("/snippets/$id") { with(asUser(user)) }
 
     @Test
     fun `el owner ve nombre, descripcion, lenguaje y contenido`() {

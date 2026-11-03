@@ -1,6 +1,5 @@
 package com.ingsis.snippet
 
-import com.ingsis.snippet.snippets.USER_HEADER
 import org.springframework.boot.context.properties.ConfigurationProperties
 import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Configuration
@@ -23,9 +22,8 @@ data class CorsProperties(
 )
 
 /**
- * CORS con Spring MVC, porque todavía no hay Spring Security. Cuando llegue Auth0, `http.cors { }`
- * en la cadena de filtros usa esta misma configuración; sin eso, el preflight llega sin token y
- * responde 401.
+ * CORS con Spring MVC. Spring Security la usa con `cors { }` en [SecurityConfig]: sin eso, el
+ * preflight llega sin token y responde 401.
  */
 @Configuration
 @EnableConfigurationProperties(CorsProperties::class)
@@ -37,8 +35,8 @@ class CorsConfig(
             .addMapping("/**")
             .allowedOrigins(*properties.allowedOrigins.toTypedArray())
             .allowedMethods("GET", "POST", "PUT", "DELETE")
-            // X-User-Id hasta que esté Auth0; después, el token va en Authorization.
-            .allowedHeaders(HttpHeaders.CONTENT_TYPE, HttpHeaders.AUTHORIZATION, USER_HEADER)
+            // El access token de Auth0 va en Authorization.
+            .allowedHeaders(HttpHeaders.CONTENT_TYPE, HttpHeaders.AUTHORIZATION)
             // Para que el JavaScript pueda leer el nombre del archivo al descargar un snippet (US13).
             .exposedHeaders(HttpHeaders.CONTENT_DISPOSITION)
             .maxAge(3600)

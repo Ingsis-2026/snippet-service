@@ -6,7 +6,6 @@ import com.ingsis.snippet.formatting.SnippetFormatter
 import com.ingsis.snippet.rules.UserRuleRepository
 import com.ingsis.snippet.snippets.Snippet
 import com.ingsis.snippet.snippets.SnippetRepository
-import com.ingsis.snippet.snippets.USER_HEADER
 import com.ingsis.snippet.snippets.ValidityStatus
 import com.ingsis.snippet.storage.ContentStore
 import com.ingsis.snippet.storage.StorageException
@@ -85,7 +84,7 @@ class AutomaticFormattingTest(
 
     private fun changeFormattingRules(body: String = """[{"name": "enforce-spacing-around-equals", "isActive": true}]""") =
         mockMvc.put("/rules/formatting") {
-            header(USER_HEADER, "auth0|ana")
+            with(asUser("auth0|ana"))
             contentType = MediaType.APPLICATION_JSON
             content = body
         }
@@ -189,7 +188,7 @@ class AutomaticFormattingTest(
     fun `cambiar reglas de lint no formatea nada`() {
         mockMvc
             .put("/rules/linting") {
-                header(USER_HEADER, "auth0|ana")
+                with(asUser("auth0|ana"))
                 contentType = MediaType.APPLICATION_JSON
                 content = """[{"name": "identifier_format", "isActive": true, "value": "snake case"}]"""
             }.andExpect { status { isOk() } }
