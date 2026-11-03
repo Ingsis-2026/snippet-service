@@ -7,6 +7,11 @@ spring:
     hibernate:
       ddl-auto: create-drop
 
+# La versión del parser no se consulta sola: los tests llaman a ParserVersionWatcher.check().
+parser:
+  watch:
+    enabled: false
+
 # Sin Redis: las colas son RecordingLintQueue y RecordingFormatQueue, en memoria.
 streams:
   redis:
