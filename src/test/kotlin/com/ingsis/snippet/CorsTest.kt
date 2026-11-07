@@ -8,11 +8,13 @@ import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc
 import org.springframework.http.HttpHeaders
+import org.springframework.http.MediaType
 import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.context.bean.override.mockito.MockitoBean
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.get
 import org.springframework.test.web.servlet.options
+import org.springframework.test.web.servlet.post
 
 /**
  * Lo que le responde la API al navegador cuando la llama JavaScript de otro origin. curl y Postman
@@ -103,8 +105,37 @@ class CorsTest(
             }
     }
 
+    /**
+     * Lo que pasa en las VMs: nginx recibe el pedido por HTTPS y se lo pasa al servicio por HTTP,
+     * con el dominio en Host y el `https` en X-Forwarded-Proto. El navegador manda Origin en cada
+     * POST, PUT y DELETE, aunque sea a su mismo dominio.
+     */
+    private fun fromDeployedUi(forwardedProto: String?) =
+        mockMvc.post("/snippets") {
+            header(HttpHeaders.HOST, "snippets.duckdns.org")
+            header(HttpHeaders.ORIGIN, "https://snippets.duckdns.org")
+            forwardedProto?.let { header("X-Forwarded-Proto", it) }
+            with(asUser("auth0|ana"))
+            contentType = MediaType.APPLICATION_JSON
+            content = "{}"
+        }
+
     @Test
-    fun `un request sin Origin, como el de la UI desplegada por nginx o curl, no lleva headers de CORS`() {
+    fun `la UI desplegada detras de nginx es el mismo origin aunque no este en la lista`() {
+        // Llega al controller, que responde 400 por el body vacío: CORS no lo frenó.
+        fromDeployedUi(forwardedProto = "https").andExpect {
+            status { isBadRequest() }
+            header { doesNotExist(HttpHeaders.ACCESS_CONTROL_ALLOW_ORIGIN) }
+        }
+    }
+
+    @Test
+    fun `sin X-Forwarded-Proto, el https del navegador parece otro origin`() {
+        fromDeployedUi(forwardedProto = null).andExpect { status { isForbidden() } }
+    }
+
+    @Test
+    fun `un request sin Origin, como el GET de la UI desplegada o curl, no lleva headers de CORS`() {
         mockMvc.get("/rules/formatting") { with(asUser("auth0|ana")) }.andExpect {
             status { isOk() }
             header { doesNotExist(HttpHeaders.ACCESS_CONTROL_ALLOW_ORIGIN) }

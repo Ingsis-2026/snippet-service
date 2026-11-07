@@ -10,8 +10,10 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer
 /**
  * Los origins, además del propio, cuyo JavaScript puede leer las respuestas. La UI desplegada no
  * necesita estar acá: llama a `/api` en su mismo dominio y nginx se lo pasa a este servicio, así
- * que para el navegador es el mismo origin. Sí hace falta para la UI corriendo en local contra
- * una API desplegada, o si la API pasa a tener su propio dominio.
+ * que es el mismo origin. Para que el servicio también lo vea así, toma el dominio y el `https`
+ * de los headers X-Forwarded-* de nginx (`server.forward-headers-strategy` en application.yml).
+ * Sí hace falta para la UI corriendo en local contra una API desplegada, o si la API pasa a tener
+ * su propio dominio.
  *
  * Nunca `*`: con el token de Auth0 el navegador no lo acepta, y cualquier página podría leer las
  * respuestas.
