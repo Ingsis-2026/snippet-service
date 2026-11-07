@@ -1,3 +1,10 @@
+# En las VMs el navegador llega por HTTPS a nginx, que le pasa el pedido a este servicio por HTTP con
+# X-Forwarded-Proto. Sin esto, el servicio se cree en http://<dominio>:80 y toma el Origin
+# https://<dominio> que el navegador manda en cada POST, PUT y DELETE como otro sitio: CORS lo
+# rechaza con 403. Solo se llega a este servicio por nginx, así que se puede confiar en esos headers.
+server:
+  forward-headers-strategy: framework
+
 spring:
   application:
     name: snippet-service
