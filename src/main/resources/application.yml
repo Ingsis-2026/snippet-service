@@ -45,6 +45,12 @@ auth0:
 cors:
   allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173}
 
+# Cada cuánto se le pregunta a language-service con qué versión del parser corre: cuando cambia,
+# se vuelven a validar todos los snippets.
+parser:
+  initial-delay: ${PARSER_CHECK_INITIAL_DELAY:30s}
+  check-interval: ${PARSER_CHECK_INTERVAL:5m}
+
 # Cada réplica lee los streams con su propio nombre de consumer: en Docker, HOSTNAME es el id del container.
 streams:
   consumer: ${HOSTNAME:snippet-service}

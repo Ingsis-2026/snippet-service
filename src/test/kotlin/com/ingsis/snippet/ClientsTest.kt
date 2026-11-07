@@ -218,6 +218,17 @@ class ClientsTest {
     }
 
     @Test
+    fun `language-service dice con que version de PrintScript corre`() {
+        server
+            .expect(requestTo("http://language/version"))
+            .andExpect(method(HttpMethod.GET))
+            .andRespond(withSuccess("""{"printscript": "1.2.0"}""", MediaType.APPLICATION_JSON))
+
+        assertEquals("1.2.0", LanguageClient(builder, "http://language").parserVersion())
+        server.verify()
+    }
+
+    @Test
     fun `language-service ejecuta el codigo con los inputs`() {
         server
             .expect(requestTo("http://language/run"))

@@ -5,7 +5,6 @@ import com.ingsis.snippet.snippets.SnippetCreatedEvent
 import com.ingsis.snippet.snippets.SnippetRepository
 import com.ingsis.snippet.snippets.SnippetService
 import com.ingsis.snippet.snippets.SnippetUpdatedEvent
-import com.ingsis.snippet.snippets.ValidityStatus
 import org.springframework.context.event.EventListener
 import org.springframework.stereotype.Component
 import org.springframework.stereotype.Service
@@ -24,7 +23,10 @@ fun interface LintQueue {
     fun enqueue(snippetIds: Collection<UUID>)
 }
 
-/** Lintea un snippet y guarda si cumple las reglas de su owner (US5, US15). */
+/**
+ * Lintea un snippet y guarda si cumple las reglas de su owner (US5, US15), o si ya no es válido
+ * para su parser (cuando hay una versión nueva del parser).
+ */
 @Service
 class SnippetLinter(
     private val repository: SnippetRepository,
@@ -40,8 +42,7 @@ class SnippetLinter(
      */
     fun lint(id: UUID) {
         val snippet = repository.findById(id).getOrNull() ?: return
-        val status = if (snippets.errorsOf(snippet).isEmpty()) ValidityStatus.COMPLIANT else ValidityStatus.NOT_COMPLIANT
-        repository.updateStatus(id, status)
+        repository.updateStatus(id, snippets.statusOf(snippet))
     }
 }
 

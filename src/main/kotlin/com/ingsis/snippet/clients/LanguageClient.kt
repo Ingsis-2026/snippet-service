@@ -45,6 +45,10 @@ internal data class FormatResult(
     val content: String,
 )
 
+internal data class VersionResult(
+    val printscript: String,
+)
+
 /** Lo que imprimió el código, en orden, y el error que cortó la ejecución si lo hubo. */
 data class RunOutcome(
     val outputs: List<String>,
@@ -88,6 +92,15 @@ class LanguageClient(
         version: String,
         rules: Map<String, Any>,
     ): String = post<FormatResult>("/format", RulesRequest(code, language, version, rules)).content
+
+    /** La versión de la librería de PrintScript con la que language-service valida y lintea ahora. */
+    fun parserVersion(): String =
+        client
+            .get()
+            .uri("/version")
+            .retrieve()
+            .body<VersionResult>()!!
+            .printscript
 
     private inline fun <reified T : Any> post(
         path: String,
