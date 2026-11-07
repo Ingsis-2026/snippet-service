@@ -2,7 +2,6 @@ package com.ingsis.snippet
 
 import com.ingsis.snippet.clients.LanguageClient
 import com.ingsis.snippet.clients.PermissionClient
-import com.ingsis.snippet.snippets.USER_HEADER
 import org.junit.jupiter.api.Nested
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
@@ -37,7 +36,7 @@ class CorsTest(
     private fun preflight(
         origin: String,
         method: String = "POST",
-        headers: String = "content-type,x-user-id",
+        headers: String = "content-type,authorization",
     ) = mockMvc.options("/snippets") {
         header(HttpHeaders.ORIGIN, origin)
         header(HttpHeaders.ACCESS_CONTROL_REQUEST_METHOD, method)
@@ -45,22 +44,27 @@ class CorsTest(
     }
 
     @Test
-    fun `la UI en local puede crear un snippet mandando su usuario`() {
+    fun `la UI en local puede crear un snippet mandando su token de Auth0`() {
         preflight(localUi).andExpect {
             status { isOk() }
             header { string(HttpHeaders.ACCESS_CONTROL_ALLOW_ORIGIN, localUi) }
             header { string(HttpHeaders.ACCESS_CONTROL_ALLOW_METHODS, "GET,POST,PUT,DELETE") }
-            header { string(HttpHeaders.ACCESS_CONTROL_ALLOW_HEADERS, "content-type, x-user-id") }
+            header { string(HttpHeaders.ACCESS_CONTROL_ALLOW_HEADERS, "content-type, authorization") }
             header { string(HttpHeaders.ACCESS_CONTROL_MAX_AGE, "3600") }
         }
     }
 
     @Test
-    fun `tambien puede mandar el token de Auth0`() {
+    fun `el preflight pasa sin token, porque el navegador nunca lo manda en el preflight`() {
         preflight(localUi, method = "DELETE", headers = "authorization").andExpect {
             status { isOk() }
             header { string(HttpHeaders.ACCESS_CONTROL_ALLOW_HEADERS, "authorization") }
         }
+    }
+
+    @Test
+    fun `X-User-Id ya no se acepta, el usuario sale del token`() {
+        preflight(localUi, headers = "x-user-id").andExpect { status { isForbidden() } }
     }
 
     @Test
@@ -91,7 +95,7 @@ class CorsTest(
         mockMvc
             .get("/rules/formatting") {
                 header(HttpHeaders.ORIGIN, localUi)
-                header(USER_HEADER, "auth0|ana")
+                with(asUser("auth0|ana"))
             }.andExpect {
                 status { isOk() }
                 header { string(HttpHeaders.ACCESS_CONTROL_ALLOW_ORIGIN, localUi) }
@@ -101,7 +105,7 @@ class CorsTest(
 
     @Test
     fun `un request sin Origin, como el de la UI desplegada por nginx o curl, no lleva headers de CORS`() {
-        mockMvc.get("/rules/formatting") { header(USER_HEADER, "auth0|ana") }.andExpect {
+        mockMvc.get("/rules/formatting") { with(asUser("auth0|ana")) }.andExpect {
             status { isOk() }
             header { doesNotExist(HttpHeaders.ACCESS_CONTROL_ALLOW_ORIGIN) }
         }

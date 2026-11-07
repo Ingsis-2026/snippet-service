@@ -9,7 +9,6 @@ import com.ingsis.snippet.rules.RuleType
 import com.ingsis.snippet.rules.UserRuleRepository
 import com.ingsis.snippet.snippets.Snippet
 import com.ingsis.snippet.snippets.SnippetRepository
-import com.ingsis.snippet.snippets.USER_HEADER
 import com.ingsis.snippet.storage.ContentStore
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
@@ -67,7 +66,7 @@ class FormatSnippetTest(
         id: UUID = snippet.id!!,
         body: String = """{"content": "$editor"}""",
     ) = mockMvc.post("/snippets/$id/format") {
-        header(USER_HEADER, user)
+        with(asUser(user))
         contentType = MediaType.APPLICATION_JSON
         content = body
     }
