@@ -7,7 +7,6 @@ import com.ingsis.snippet.clients.Role
 import com.ingsis.snippet.clients.RunOutcome
 import com.ingsis.snippet.snippets.Snippet
 import com.ingsis.snippet.snippets.SnippetRepository
-import com.ingsis.snippet.snippets.USER_HEADER
 import com.ingsis.snippet.storage.ContentStore
 import com.ingsis.snippet.tests.TestCase
 import com.ingsis.snippet.tests.TestCaseRepository
@@ -78,7 +77,7 @@ class AutomaticTestsTest(
 
     private fun update(content: String = updated) =
         mockMvc.put("/snippets/${snippet.id}") {
-            header(USER_HEADER, "auth0|ana")
+            with(asUser("auth0|ana"))
             contentType = MediaType.APPLICATION_JSON
             this.content =
                 """{"name": "Saludo", "description": "Saluda", "language": "printscript", "version": "1.1",
@@ -104,7 +103,7 @@ class AutomaticTestsTest(
     fun `el resultado se ve al listar los tests`() {
         update()
 
-        mockMvc.get("/snippets/${snippet.id}/tests") { header(USER_HEADER, "auth0|ana") }.andExpect {
+        mockMvc.get("/snippets/${snippet.id}/tests") { with(asUser("auth0|ana")) }.andExpect {
             jsonPath("$[?(@.name == 'Saluda a Ana')].status") { value("PASSED") }
             jsonPath("$[?(@.name == 'Saluda a Beto')].status") { value("FAILED") }
         }
@@ -160,7 +159,7 @@ class AutomaticTestsTest(
             .`when`(languageClient.run(code, "printscript", "1.1", listOf("Ana")))
             .thenReturn(RunOutcome(listOf("Hola"), null))
 
-        mockMvc.post("/snippets/${snippet.id}/tests/${ana.id}/run") { header(USER_HEADER, "auth0|ana") }.andExpect {
+        mockMvc.post("/snippets/${snippet.id}/tests/${ana.id}/run") { with(asUser("auth0|ana")) }.andExpect {
             jsonPath("$.passed") { value(false) }
         }
 

@@ -5,7 +5,6 @@ import com.ingsis.snippet.clients.LanguageClient
 import com.ingsis.snippet.clients.PermissionClient
 import com.ingsis.snippet.clients.UnsupportedLanguageException
 import com.ingsis.snippet.snippets.SnippetRepository
-import com.ingsis.snippet.snippets.USER_HEADER
 import com.ingsis.snippet.snippets.ValidityStatus
 import com.ingsis.snippet.storage.ContentStore
 import org.junit.jupiter.api.AfterEach
@@ -54,7 +53,7 @@ class CreateSnippetTest(
     ) = mockMvc.multipart("/snippets") {
         file(MockMultipartFile("file", "saludo.ps", "text/plain", content.toByteArray()))
         params.forEach { (key, value) -> param(key, value) }
-        user?.let { header(USER_HEADER, it) }
+        user?.let { with(asUser(it)) }
     }
 
     @Test
@@ -118,8 +117,8 @@ class CreateSnippetTest(
     }
 
     @Test
-    fun `sin usuario es un 400`() {
-        upload(user = null).andExpect { status { isBadRequest() } }
+    fun `sin token es un 401 y no se guarda nada`() {
+        upload(user = null).andExpect { status { isUnauthorized() } }
         verifyNoInteractions(languageClient)
     }
 
@@ -152,7 +151,7 @@ class CreateSnippetTest(
         content: String = code,
         name: String = "Saludo",
     ) = mockMvc.post("/snippets") {
-        header(USER_HEADER, "auth0|ana")
+        with(asUser("auth0|ana"))
         contentType = MediaType.APPLICATION_JSON
         this.content =
             """{"name": "$name", "description": "Desde el editor", "language": "printscript", "version": "1.0",

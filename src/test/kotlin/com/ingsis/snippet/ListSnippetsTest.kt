@@ -5,7 +5,6 @@ import com.ingsis.snippet.clients.PermissionClient
 import com.ingsis.snippet.clients.Role
 import com.ingsis.snippet.snippets.Snippet
 import com.ingsis.snippet.snippets.SnippetRepository
-import com.ingsis.snippet.snippets.USER_HEADER
 import com.ingsis.snippet.snippets.ValidityStatus
 import com.ingsis.snippet.storage.ContentStore
 import org.hamcrest.Matchers.contains
@@ -67,7 +66,7 @@ class ListSnippetsTest(
         vararg params: Pair<String, String>,
         user: String = "auth0|ana",
     ) = mockMvc.get("/snippets") {
-        header(USER_HEADER, user)
+        with(asUser(user))
         params.forEach { (key, value) -> param(key, value) }
     }
 

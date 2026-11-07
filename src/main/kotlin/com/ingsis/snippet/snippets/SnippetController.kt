@@ -1,5 +1,6 @@
 package com.ingsis.snippet.snippets
 
+import com.ingsis.snippet.CurrentUser
 import com.ingsis.snippet.clients.CodeError
 import jakarta.validation.Valid
 import jakarta.validation.constraints.NotBlank
@@ -16,18 +17,11 @@ import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.PutMapping
 import org.springframework.web.bind.annotation.RequestBody
-import org.springframework.web.bind.annotation.RequestHeader
 import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.ResponseStatus
 import org.springframework.web.bind.annotation.RestController
 import org.springframework.web.multipart.MultipartFile
 import java.util.UUID
-
-/**
- * Hasta que se vea Auth0 en clase, el usuario llega en este header. Después va a salir del
- * `sub` del JWT, y este header desaparece.
- */
-const val USER_HEADER = "X-User-Id"
 
 /** Un snippet escrito en el editor (US3, US4): el código llega como texto en vez de como archivo. */
 data class SnippetRequest(
@@ -96,7 +90,7 @@ class SnippetController(
     @PostMapping("/snippets", consumes = [MediaType.MULTIPART_FORM_DATA_VALUE])
     @ResponseStatus(HttpStatus.CREATED)
     fun createFromFile(
-        @RequestHeader(USER_HEADER) @NotBlank userId: String,
+        @CurrentUser userId: String,
         @RequestParam @NotBlank name: String,
         @RequestParam @NotBlank description: String,
         @RequestParam @NotBlank language: String,
@@ -108,7 +102,7 @@ class SnippetController(
     @PostMapping("/snippets", consumes = [MediaType.APPLICATION_JSON_VALUE])
     @ResponseStatus(HttpStatus.CREATED)
     fun createFromEditor(
-        @RequestHeader(USER_HEADER) @NotBlank userId: String,
+        @CurrentUser userId: String,
         @Valid @RequestBody request: SnippetRequest,
     ): SnippetResponse = service.create(userId, request.toData()).toResponse()
 
@@ -118,7 +112,7 @@ class SnippetController(
      */
     @GetMapping("/snippets")
     fun list(
-        @RequestHeader(USER_HEADER) @NotBlank userId: String,
+        @CurrentUser userId: String,
         @RequestParam(defaultValue = "ALL") relation: Relation,
         @RequestParam(required = false) name: String?,
         @RequestParam(required = false) language: String?,
@@ -133,14 +127,14 @@ class SnippetController(
     @GetMapping("/snippets/{id}")
     fun get(
         @PathVariable id: UUID,
-        @RequestHeader(USER_HEADER) @NotBlank userId: String,
+        @CurrentUser userId: String,
     ): SnippetResponse = service.get(id, userId).toResponse()
 
     /** US2: actualizar un snippet subiendo un archivo. Se mandan todos los datos, cambien o no. */
     @PutMapping("/snippets/{id}", consumes = [MediaType.MULTIPART_FORM_DATA_VALUE])
     fun updateFromFile(
         @PathVariable id: UUID,
-        @RequestHeader(USER_HEADER) @NotBlank userId: String,
+        @CurrentUser userId: String,
         @RequestParam @NotBlank name: String,
         @RequestParam @NotBlank description: String,
         @RequestParam @NotBlank language: String,
@@ -152,7 +146,7 @@ class SnippetController(
     @PutMapping("/snippets/{id}", consumes = [MediaType.APPLICATION_JSON_VALUE])
     fun updateFromEditor(
         @PathVariable id: UUID,
-        @RequestHeader(USER_HEADER) @NotBlank userId: String,
+        @CurrentUser userId: String,
         @Valid @RequestBody request: SnippetRequest,
     ): SnippetResponse = service.update(id, userId, request.toData()).toResponse()
 
@@ -160,7 +154,7 @@ class SnippetController(
     @GetMapping("/snippets/{id}/lint")
     fun lint(
         @PathVariable id: UUID,
-        @RequestHeader(USER_HEADER) @NotBlank userId: String,
+        @CurrentUser userId: String,
     ): LintResponse {
         val errors = service.lint(id, userId)
         return LintResponse(valid = errors.isEmpty(), errors = errors)
@@ -170,7 +164,7 @@ class SnippetController(
     @PostMapping("/snippets/{id}/format")
     fun format(
         @PathVariable id: UUID,
-        @RequestHeader(USER_HEADER) @NotBlank userId: String,
+        @CurrentUser userId: String,
         @RequestBody request: FormatRequest,
     ): FormatResponse = FormatResponse(service.format(id, userId, request.content))
 
@@ -179,14 +173,14 @@ class SnippetController(
     @ResponseStatus(HttpStatus.NO_CONTENT)
     fun delete(
         @PathVariable id: UUID,
-        @RequestHeader(USER_HEADER) @NotBlank userId: String,
+        @CurrentUser userId: String,
     ) = service.delete(id, userId)
 
     /** US13: descargar un snippet, en su versión original o formateada (`formatted=true`). */
     @GetMapping("/snippets/{id}/download")
     fun download(
         @PathVariable id: UUID,
-        @RequestHeader(USER_HEADER) @NotBlank userId: String,
+        @CurrentUser userId: String,
         @RequestParam(defaultValue = "false") formatted: Boolean,
     ): ResponseEntity<String> {
         val file = service.download(id, userId, formatted)
@@ -207,7 +201,7 @@ class SnippetController(
     @PostMapping("/snippets/{id}/share")
     fun share(
         @PathVariable id: UUID,
-        @RequestHeader(USER_HEADER) @NotBlank userId: String,
+        @CurrentUser userId: String,
         @Valid @RequestBody request: ShareRequest,
     ): SnippetResponse = service.share(id, userId, request.userId).toResponse()
 
