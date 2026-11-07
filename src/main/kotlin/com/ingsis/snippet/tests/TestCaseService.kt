@@ -80,8 +80,8 @@ class TestCaseService(
 
     /**
      * US6: correr un test desde la vista del snippet. Lo puede correr cualquiera que vea el
-     * snippet (US9 habla de "un snippet al que tengo acceso"). Se espera a que termine: ver el
-     * output a medida que se evalúa es US9, que se ve más adelante.
+     * snippet (US9 habla de "un snippet al que tengo acceso"). Se espera a que termine: para ver
+     * el output a medida que se evalúa (US9) está el WebSocket de `/execution`.
      *
      * El resultado queda guardado en el test, igual que cuando se corre solo (US16).
      */
@@ -161,11 +161,31 @@ class TestCaseService(
     }
 
     /**
-     * Un test pasa si el snippet termina sin error e imprime exactamente los outputs esperados,
-     * en el mismo orden. Devuelve si pasó y lo deja guardado en el test.
+     * US9: el test que se va a correr por `/execution`, con lo que hace falta para correrlo y
+     * para saber al final si pasó. Lo puede correr cualquiera que vea el snippet, como [run].
      */
+    @Transactional(readOnly = true)
+    fun toRun(
+        snippetId: UUID,
+        testId: UUID,
+    ): TestToRun {
+        val test = find(testId, snippetId)
+        return TestToRun(test.id!!, test.inputs.toList(), test.outputs.toList())
+    }
+
+    /** US9: guarda el resultado de un test que se corrió por `/execution`. */
+    @Transactional
+    fun record(
+        snippetId: UUID,
+        testId: UUID,
+        outcome: RunOutcome,
+    ) {
+        find(testId, snippetId).record(outcome)
+    }
+
+    /** Devuelve si pasó y lo deja guardado en el test. */
     private fun TestCase.record(outcome: RunOutcome): Boolean {
-        val passed = outcome.error == null && outcome.outputs == outputs
+        val passed = outcome.passes(outputs)
         status = if (passed) TestStatus.PASSED else TestStatus.FAILED
         return passed
     }
@@ -182,6 +202,19 @@ class TestCaseService(
         val log: Logger = LoggerFactory.getLogger(TestCaseService::class.java)
     }
 }
+
+/** Un test listo para correr: sus inputs y los outputs que se esperan. */
+data class TestToRun(
+    val id: UUID,
+    val inputs: List<String>,
+    val expected: List<String>,
+)
+
+/**
+ * Un test pasa si el snippet termina sin error e imprime exactamente los outputs esperados, en el
+ * mismo orden.
+ */
+fun RunOutcome.passes(expected: List<String>): Boolean = error == null && outputs == expected
 
 class TestCaseNotFoundException(
     id: UUID,

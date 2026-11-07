@@ -18,9 +18,10 @@ import org.springframework.security.web.SecurityFilterChain
 annotation class CurrentUser
 
 /**
- * Todos los endpoints piden un access token de Auth0, salvo el health check. Spring valida la
- * firma con las claves públicas del tenant, que el issuer sea ese tenant, que no esté vencido y
- * que sea para esta API (`audiences`): un token emitido para otra API del mismo tenant no sirve.
+ * Todos los endpoints piden un access token de Auth0, salvo el health check y el WebSocket de
+ * `/execution`, que lo pide en su primer mensaje. Spring valida la firma con las claves públicas
+ * del tenant, que el issuer sea ese tenant, que no esté vencido y que sea para esta API
+ * (`audiences`): un token emitido para otra API del mismo tenant no sirve.
  *
  * Sin CSRF ni sesión: el token viaja en cada pedido en `Authorization`, no en una cookie.
  */
@@ -31,6 +32,9 @@ class SecurityConfig {
         http {
             authorizeHttpRequests {
                 authorize("/actuator/health", permitAll)
+                // El navegador no puede mandar Authorization al abrir un WebSocket: el token llega
+                // en el primer mensaje y lo valida ExecutionHandler.
+                authorize("/execution", permitAll)
                 authorize(anyRequest, authenticated)
             }
             oauth2ResourceServer { jwt { } }
