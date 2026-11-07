@@ -56,6 +56,7 @@ Necesita su Postgres, asset-service (con su Azurite) y Redis. Lo más simple es 
 | `REDIS_HOST` / `REDIS_PORT` | `localhost` / `6379` |
 | `HOSTNAME` | `snippet-service`. Es el nombre de la réplica en el consumer group; en Docker es el id del container. |
 | `AUTH0_DOMAIN` / `AUTH0_AUDIENCE` | `dev-2fvmkxju8g70kqvs.us.auth0.com` / `https://snippet-searcher/api`. El tenant de Auth0 que emite los access tokens y el identifier de esta API en ese tenant. No son secretos. |
+| `AUTH0_M2M_CLIENT_ID` / `AUTH0_M2M_CLIENT_SECRET` | Vacíos. La aplicación machine-to-machine de Auth0 con `read:users` en la Management API, para buscar con quién compartir (US7). Sin ellos, `GET /users` responde 503 y el resto anda igual. **El secret nunca se commitea.** |
 | `CORS_ALLOWED_ORIGINS` | `http://localhost:5173`. Origins de otros dominios que pueden llamar a la API desde el navegador, separados por comas. La UI desplegada no lo necesita: llama a `/api` en su mismo dominio. |
 
 ## Calidad
