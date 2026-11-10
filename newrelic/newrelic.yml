@@ -1,0 +1,37 @@
+# Configuración del agente de New Relic, igual a la del asset-service de la cátedra. El agente la lee de la
+# carpeta de su jar (/app/newrelic en la imagen). Lo que cambia por entorno va en variables, que pisan este archivo:
+#   NEW_RELIC_AGENT_ENABLED  true en las VMs; sin ella el agente no hace nada (docker-compose, tests, el IDE)
+#   NEW_RELIC_LICENSE_KEY    la license key (ingest) de la cuenta; va en el .env de la VM, nunca acá
+#   NEW_RELIC_APP_NAME       <servicio>-<entorno>, así dev y prod son aplicaciones distintas en New Relic
+#   NEW_RELIC_LABELS         por ejemplo "env:dev;stack:snippet", para filtrar en los dashboards
+common: &default_settings
+  agent_enabled: false
+  log_file_name: STDOUT
+  log_level: info
+
+  # El trace de cada pedido sigue por todos los servicios: el agente agrega los headers traceparent y
+  # newrelic a cada llamado HTTP (RestClient) y los lee del lado del que lo recibe.
+  distributed_tracing:
+    enabled: true
+  span_events:
+    enabled: true
+
+  # Los logs llegan a New Relic con el trace.id del pedido: desde un trace se ven sus logs.
+  application_logging:
+    enabled: true
+    forwarding:
+      enabled: true
+    metrics:
+      enabled: true
+    local_decorating:
+      enabled: false
+
+  transaction_tracer:
+    enabled: true
+    record_sql: obfuscated
+  error_collector:
+    enabled: true
+    # Los 4xx son respuestas esperadas (un snippet inválido, sin permiso, no existe): no son errores del servicio.
+    ignore_status_codes: 400-499
+  browser_monitoring:
+    auto_instrument: false
