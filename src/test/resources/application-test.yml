@@ -12,6 +12,10 @@ parser:
   watch:
     enabled: false
 
+# Los reportes a New Relic no corren solos: los tests llaman a InventoryReporter.report().
+observability:
+  enabled: false
+
 # Sin Redis: las colas son RecordingLintQueue y RecordingFormatQueue, en memoria.
 streams:
   redis:

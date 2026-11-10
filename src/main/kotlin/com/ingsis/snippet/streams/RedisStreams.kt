@@ -4,6 +4,12 @@ import com.ingsis.snippet.formatting.FormatQueue
 import com.ingsis.snippet.formatting.SnippetFormatter
 import com.ingsis.snippet.linting.LintQueue
 import com.ingsis.snippet.linting.SnippetLinter
+import com.ingsis.snippet.observability.Telemetry
+import com.newrelic.api.agent.ConcurrentHashMapHeaders
+import com.newrelic.api.agent.HeaderType
+import com.newrelic.api.agent.NewRelic
+import com.newrelic.api.agent.Trace
+import com.newrelic.api.agent.TransportType
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
@@ -90,9 +96,21 @@ class RedisStreamsConfig {
         formatter: SnippetFormatter,
         properties: StreamProperties,
     ) = RedisSnippetWorker(redis, properties.formatStream, properties, formatter::format)
+
+    @Bean
+    fun streamBacklogReporter(
+        redis: StringRedisTemplate,
+        properties: StreamProperties,
+        telemetry: Telemetry,
+    ) = StreamBacklogReporter(redis, listOf(properties.lintStream, properties.formatStream), properties, telemetry)
 }
 
-/** Cada snippet es un mensaje de [stream], con su id en el campo [SNIPPET_ID]. */
+/**
+ * Cada snippet es un mensaje de [stream], con su id en el campo [SNIPPET_ID]. Si corre con el agente de New
+ * Relic, el mensaje lleva además los headers del trace del pedido que lo encoló (`traceparent`, `newrelic`),
+ * así el linteo o el formateo en segundo plano aparece en el mismo trace que la creación del snippet.
+ * Sin el agente no se agrega nada.
+ */
 class RedisSnippetQueue(
     private val redis: StringRedisTemplate,
     private val stream: String,
@@ -100,8 +118,9 @@ class RedisSnippetQueue(
 ) {
     fun enqueue(snippetIds: Collection<UUID>) {
         val options = XAddOptions.maxlen(properties.maxLength).approximateTrimming(true)
+        val trace = traceHeaders()
         for (id in snippetIds) {
-            redis.opsForStream<String, String>().add(stream, mapOf(SNIPPET_ID to id.toString()), options)
+            redis.opsForStream<String, String>().add(stream, trace + (SNIPPET_ID to id.toString()), options)
         }
     }
 }
@@ -174,7 +193,17 @@ class RedisSnippetWorker(
             .forEach(::handle)
     }
 
+    /**
+     * Cada mensaje es una transacción de New Relic (`RedisStream/<stream>`) que continúa el trace de quien lo
+     * encoló. Sin el agente, la anotación y las llamadas a NewRelic no hacen nada.
+     */
+    @Trace(dispatcher = true)
     private fun handle(record: MapRecord<String, String, String>) {
+        NewRelic.setTransactionName("RedisStream", stream)
+        NewRelic
+            .getAgent()
+            .transaction
+            .acceptDistributedTraceHeaders(TransportType.Queue, traceHeadersOf(record.value))
         val id = record.value[SNIPPET_ID]?.let { runCatching { UUID.fromString(it) }.getOrNull() }
         if (id == null) {
             log.error("Se descarta el mensaje ${record.id} de $stream: no trae un $SNIPPET_ID válido")
@@ -185,6 +214,7 @@ class RedisSnippetWorker(
             process(id)
             acknowledge(record.id)
         } catch (e: RuntimeException) {
+            NewRelic.noticeError(e)
             log.warn("No se pudo procesar el snippet $id de $stream; se reintenta en ${properties.retryAfter}", e)
         }
     }
@@ -199,3 +229,14 @@ class RedisSnippetWorker(
 }
 
 const val SNIPPET_ID = "snippetId"
+
+/** Los headers con los que New Relic continúa un trace en otro proceso, para guardarlos en un mensaje. */
+private fun traceHeaders(): Map<String, String> {
+    val headers = ConcurrentHashMapHeaders.build(HeaderType.MESSAGE)
+    NewRelic.getAgent().transaction.insertDistributedTraceHeaders(headers)
+    return headers.headerNames.associateWith { headers.getHeader(it) }
+}
+
+/** Los headers de trace que trae un mensaje: todos sus campos menos el id del snippet. */
+private fun traceHeadersOf(fields: Map<String, String>) =
+    ConcurrentHashMapHeaders.buildFromFlatMap(HeaderType.MESSAGE, fields.filterKeys { it != SNIPPET_ID })
