@@ -67,3 +67,8 @@ management:
     web:
       exposure:
         include: health
+
+# Cada cuánto se le reporta a New Relic cuántos snippets hay y cuánto espera en los streams de Redis.
+observability:
+  initial-delay: ${OBSERVABILITY_INITIAL_DELAY:1m}
+  interval: ${OBSERVABILITY_INTERVAL:1m}

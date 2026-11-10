@@ -4,6 +4,7 @@ import com.ingsis.snippet.formatting.FormatQueue
 import com.ingsis.snippet.formatting.SnippetFormatter
 import com.ingsis.snippet.linting.LintQueue
 import com.ingsis.snippet.linting.SnippetLinter
+import com.ingsis.snippet.observability.Telemetry
 import com.newrelic.api.agent.ConcurrentHashMapHeaders
 import com.newrelic.api.agent.HeaderType
 import com.newrelic.api.agent.NewRelic
@@ -95,6 +96,13 @@ class RedisStreamsConfig {
         formatter: SnippetFormatter,
         properties: StreamProperties,
     ) = RedisSnippetWorker(redis, properties.formatStream, properties, formatter::format)
+
+    @Bean
+    fun streamBacklogReporter(
+        redis: StringRedisTemplate,
+        properties: StreamProperties,
+        telemetry: Telemetry,
+    ) = StreamBacklogReporter(redis, listOf(properties.lintStream, properties.formatStream), properties, telemetry)
 }
 
 /**

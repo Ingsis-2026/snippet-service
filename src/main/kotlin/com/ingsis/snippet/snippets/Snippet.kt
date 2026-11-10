@@ -42,6 +42,12 @@ class Snippet(
     val id: UUID? = null,
 )
 
+/** Cuántos snippets hay en un estado. */
+interface StatusCount {
+    val status: ValidityStatus
+    val total: Long
+}
+
 interface SnippetRepository :
     JpaRepository<Snippet, UUID>,
     JpaSpecificationExecutor<Snippet> {
@@ -50,6 +56,14 @@ interface SnippetRepository :
 
     @Query("select s.id from Snippet s")
     fun findAllIds(): List<UUID>
+
+    fun countByOwnerId(ownerId: String): Long
+
+    @Query("select s.status as status, count(s) as total from Snippet s group by s.status")
+    fun countByStatus(): List<StatusCount>
+
+    @Query("select count(distinct s.ownerId) from Snippet s")
+    fun countOwners(): Long
 
     /** Todos los snippets, de todos los usuarios, vuelven a `PENDING` hasta que se los valide con el parser nuevo. */
     @Transactional

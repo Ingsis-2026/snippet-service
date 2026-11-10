@@ -3,6 +3,7 @@ package com.ingsis.snippet.snippets
 import com.ingsis.snippet.clients.CodeError
 import com.ingsis.snippet.clients.LanguageClient
 import com.ingsis.snippet.clients.PermissionClient
+import com.ingsis.snippet.observability.Telemetry
 import com.ingsis.snippet.rules.RuleService
 import com.ingsis.snippet.rules.RuleType
 import com.ingsis.snippet.storage.ContentStore
@@ -50,6 +51,14 @@ data class SnippetUpdatedEvent(
  */
 data class SnippetDeletedEvent(
     val snippetId: UUID,
+    val ownerId: String,
+)
+
+/** El owner le compartió un snippet a otro usuario (US7). */
+data class SnippetSharedEvent(
+    val snippetId: UUID,
+    val ownerId: String,
+    val userId: String,
 )
 
 data class SnippetFile(
@@ -66,6 +75,7 @@ class SnippetService(
     private val access: SnippetAccess,
     private val ruleService: RuleService,
     private val events: ApplicationEventPublisher,
+    private val telemetry: Telemetry,
 ) {
     /**
      * Solo se guarda un snippet que su parser acepta (US1, US3). El owner se registra en
@@ -101,6 +111,10 @@ class SnippetService(
      * US5: los snippets que el usuario puede ver. Cuáles son lo decide permission-service; el
      * filtro, el orden y la página se resuelven en la base, sobre esos ids. El código se lee solo
      * para los snippets de la página.
+     *
+     * Cuántos encontró queda en la transacción (`snippets.listed`). Y si permission-service dice que
+     * el usuario no tiene ninguno pero en la base hay snippets suyos, sus snippets «desaparecieron»
+     * aunque la respuesta sea un 200: se avisa con un evento `SnippetsHidden` y un error en el log.
      */
     @Transactional(readOnly = true)
     fun list(
@@ -110,8 +124,22 @@ class SnippetService(
     ): Page<SnippetWithContent> {
         SnippetFilter.requireSortable(pageable.sort)
         val ids = permissionClient.snippetsOf(userId, filter.relation.role)
-        if (ids.isEmpty()) return Page.empty(pageable)
-        return repository.findAll(filter.among(ids), pageable).map { withContent(it) }
+        if (ids.isEmpty()) {
+            if (filter.relation != Relation.SHARED) checkNoneHidden(userId)
+            telemetry.addTransactionAttribute(LISTED_ATTRIBUTE, 0)
+            return Page.empty(pageable)
+        }
+        val page = repository.findAll(filter.among(ids), pageable)
+        telemetry.addTransactionAttribute(LISTED_ATTRIBUTE, page.totalElements)
+        return page.map { withContent(it) }
+    }
+
+    /** Un snippet en la base sin su owner en permission-service no lo ve nadie, ni su owner. */
+    private fun checkNoneHidden(userId: String) {
+        val owned = repository.countByOwnerId(userId)
+        if (owned == 0L) return
+        log.error("$userId tiene $owned snippets en la base, pero permission-service no le devuelve ninguno")
+        telemetry.recordEvent(HIDDEN_EVENT, mapOf("userId" to userId, "owned" to owned))
     }
 
     /**
@@ -197,6 +225,7 @@ class SnippetService(
     ): SnippetWithContent {
         val snippet = access.requireOwner(id, ownerId)
         permissionClient.grantRead(id, userId)
+        events.publishEvent(SnippetSharedEvent(id, ownerId, userId))
         return withContent(snippet)
     }
 
@@ -244,8 +273,8 @@ class SnippetService(
         id: UUID,
         userId: String,
     ) {
-        access.requireOwner(id, userId)
-        events.publishEvent(SnippetDeletedEvent(id))
+        val snippet = access.requireOwner(id, userId)
+        events.publishEvent(SnippetDeletedEvent(id, snippet.ownerId))
         repository.deleteById(id)
         repository.flush()
         permissionClient.revokeAll(id)
@@ -271,6 +300,12 @@ class SnippetService(
         val log: Logger = LoggerFactory.getLogger(SnippetService::class.java)
     }
 }
+
+/** Cuántos snippets encontró un listado, en la transacción del pedido. */
+const val LISTED_ATTRIBUTE = "snippets.listed"
+
+/** Un usuario con snippets en la base a quien permission-service no le devuelve ninguno. */
+const val HIDDEN_EVENT = "SnippetsHidden"
 
 class InvalidSnippetException(
     val errors: List<CodeError>,
