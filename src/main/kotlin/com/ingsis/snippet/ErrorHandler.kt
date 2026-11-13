@@ -1,11 +1,19 @@
 package com.ingsis.snippet
 
+import com.ingsis.snippet.clients.AlreadyHasAccessException
 import com.ingsis.snippet.clients.UnsupportedLanguageException
+import com.ingsis.snippet.rules.ConflictingRulesException
+import com.ingsis.snippet.rules.InvalidRuleValueException
+import com.ingsis.snippet.rules.UnknownRuleException
 import com.ingsis.snippet.snippets.EmptyFileException
 import com.ingsis.snippet.snippets.InvalidSnippetException
+import com.ingsis.snippet.snippets.InvalidSortException
 import com.ingsis.snippet.snippets.NoAccessException
 import com.ingsis.snippet.snippets.NotOwnerException
 import com.ingsis.snippet.snippets.SnippetNotFoundException
+import com.ingsis.snippet.storage.StorageException
+import com.ingsis.snippet.tests.TestCaseNotFoundException
+import com.ingsis.snippet.users.UsersUnavailableException
 import org.springframework.http.HttpStatus
 import org.springframework.http.ProblemDetail
 import org.springframework.web.bind.annotation.ExceptionHandler
@@ -21,17 +29,32 @@ class ErrorHandler {
             setProperty("errors", e.errors)
         }
 
-    @ExceptionHandler(UnsupportedLanguageException::class, EmptyFileException::class)
+    @ExceptionHandler(
+        UnsupportedLanguageException::class,
+        EmptyFileException::class,
+        InvalidSortException::class,
+        UnknownRuleException::class,
+        InvalidRuleValueException::class,
+        ConflictingRulesException::class,
+    )
     fun badRequest(e: RuntimeException): ProblemDetail = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, e.message)
 
-    @ExceptionHandler(SnippetNotFoundException::class)
-    fun notFound(e: SnippetNotFoundException): ProblemDetail = ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, e.message)
+    @ExceptionHandler(SnippetNotFoundException::class, TestCaseNotFoundException::class)
+    fun notFound(e: RuntimeException): ProblemDetail = ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, e.message)
 
     @ExceptionHandler(NotOwnerException::class, NoAccessException::class)
     fun forbidden(e: RuntimeException): ProblemDetail = ProblemDetail.forStatusAndDetail(HttpStatus.FORBIDDEN, e.message)
 
-    /** Otro servicio no respondió o respondió con un error que no esperábamos. */
-    @ExceptionHandler(RestClientException::class)
-    fun downstreamFailure(e: RestClientException): ProblemDetail =
+    @ExceptionHandler(AlreadyHasAccessException::class)
+    fun conflict(e: RuntimeException): ProblemDetail = ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, e.message)
+
+    /** Otro servicio, o asset-service al guardar o leer el código, no respondió o respondió con un error que no esperábamos. */
+    @ExceptionHandler(RestClientException::class, StorageException::class)
+    fun downstreamFailure(e: RuntimeException): ProblemDetail =
         ProblemDetail.forStatusAndDetail(HttpStatus.BAD_GATEWAY, "Falló un servicio interno")
+
+    /** US7: Auth0 no respondió, o falta configurar la aplicación con la que se buscan usuarios. */
+    @ExceptionHandler(UsersUnavailableException::class)
+    fun usersUnavailable(e: UsersUnavailableException): ProblemDetail =
+        ProblemDetail.forStatusAndDetail(HttpStatus.SERVICE_UNAVAILABLE, e.message)
 }

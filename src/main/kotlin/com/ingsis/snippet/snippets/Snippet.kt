@@ -8,11 +8,20 @@ import jakarta.persistence.GeneratedValue
 import jakarta.persistence.GenerationType
 import jakarta.persistence.Id
 import org.springframework.data.jpa.repository.JpaRepository
+import org.springframework.data.jpa.repository.JpaSpecificationExecutor
+import org.springframework.data.jpa.repository.Modifying
+import org.springframework.data.jpa.repository.Query
+import org.springframework.transaction.annotation.Transactional
 import java.util.UUID
 
-/** Si el snippet cumple las reglas de lint de su owner (US5). Arranca `PENDING` hasta que se lintee. */
-enum class ValidityStatus { PENDING, COMPLIANT, NOT_COMPLIANT }
+/**
+ * Si el snippet cumple las reglas de lint de su owner (US5). Arranca `PENDING` hasta que se lintee.
+ * `INVALID` es que ya no es válido para su parser: se guardó con una versión anterior y la actual
+ * no lo acepta, así que ni siquiera se puede lintear.
+ */
+enum class ValidityStatus { PENDING, COMPLIANT, NOT_COMPLIANT, INVALID }
 
+/** La metadata de un snippet. Su código se guarda aparte, en el [com.ingsis.snippet.storage.ContentStore]. */
 @Entity
 class Snippet(
     @Column(nullable = false)
@@ -23,8 +32,6 @@ class Snippet(
     var language: String,
     @Column(nullable = false)
     var version: String,
-    @Column(nullable = false, columnDefinition = "text")
-    var content: String,
     @Column(nullable = false)
     val ownerId: String,
     @Enumerated(EnumType.STRING)
@@ -35,4 +42,50 @@ class Snippet(
     val id: UUID? = null,
 )
 
-interface SnippetRepository : JpaRepository<Snippet, UUID>
+/** Cuántos snippets hay en un estado. */
+interface StatusCount {
+    val status: ValidityStatus
+    val total: Long
+}
+
+interface SnippetRepository :
+    JpaRepository<Snippet, UUID>,
+    JpaSpecificationExecutor<Snippet> {
+    @Query("select s.id from Snippet s where s.ownerId = :ownerId")
+    fun findIdsByOwnerId(ownerId: String): List<UUID>
+
+    @Query("select s.id from Snippet s")
+    fun findAllIds(): List<UUID>
+
+    fun countByOwnerId(ownerId: String): Long
+
+    @Query("select s.status as status, count(s) as total from Snippet s group by s.status")
+    fun countByStatus(): List<StatusCount>
+
+    @Query("select count(distinct s.ownerId) from Snippet s")
+    fun countOwners(): Long
+
+    /** Todos los snippets, de todos los usuarios, vuelven a `PENDING` hasta que se los valide con el parser nuevo. */
+    @Transactional
+    @Modifying
+    @Query("update Snippet s set s.status = com.ingsis.snippet.snippets.ValidityStatus.PENDING")
+    fun markAllPending(): Int
+
+    /** Todos los snippets del owner vuelven a `PENDING` hasta que se los lintee con sus reglas nuevas (US15). */
+    @Transactional
+    @Modifying
+    @Query("update Snippet s set s.status = com.ingsis.snippet.snippets.ValidityStatus.PENDING where s.ownerId = :ownerId")
+    fun markPendingByOwner(ownerId: String): Int
+
+    /**
+     * Cambia solo el estado. Guardar la entidad entera pisaría con datos viejos un update del
+     * snippet que haya entrado mientras se lo linteaba.
+     */
+    @Transactional
+    @Modifying
+    @Query("update Snippet s set s.status = :status where s.id = :id")
+    fun updateStatus(
+        id: UUID,
+        status: ValidityStatus,
+    ): Int
+}

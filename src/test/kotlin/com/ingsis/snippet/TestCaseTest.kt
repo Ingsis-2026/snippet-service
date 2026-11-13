@@ -1,12 +1,15 @@
 package com.ingsis.snippet
 
+import com.ingsis.snippet.clients.CodeError
 import com.ingsis.snippet.clients.LanguageClient
 import com.ingsis.snippet.clients.PermissionClient
 import com.ingsis.snippet.clients.Role
+import com.ingsis.snippet.clients.RunOutcome
 import com.ingsis.snippet.snippets.Snippet
 import com.ingsis.snippet.snippets.SnippetRepository
-import com.ingsis.snippet.snippets.USER_HEADER
+import com.ingsis.snippet.storage.ContentStore
 import com.ingsis.snippet.tests.TestCaseRepository
+import com.ingsis.snippet.tests.TestStatus
 import org.hamcrest.Matchers.contains
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
@@ -20,8 +23,10 @@ import org.springframework.http.MediaType
 import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.context.bean.override.mockito.MockitoBean
 import org.springframework.test.web.servlet.MockMvc
+import org.springframework.test.web.servlet.delete
 import org.springframework.test.web.servlet.get
 import org.springframework.test.web.servlet.post
+import org.springframework.test.web.servlet.put
 import java.util.UUID
 import kotlin.test.assertEquals
 
@@ -33,9 +38,12 @@ class TestCaseTest(
     @Autowired private val mockMvc: MockMvc,
     @Autowired private val snippets: SnippetRepository,
     @Autowired private val tests: TestCaseRepository,
+    @Autowired private val contents: ContentStore,
 ) {
     @MockitoBean
     private lateinit var languageClient: LanguageClient
+
+    private val code = "let n: string = readInput(\"?\");"
 
     @MockitoBean
     private lateinit var permissionClient: PermissionClient
@@ -45,9 +53,7 @@ class TestCaseTest(
     @BeforeEach
     fun setUp() {
         snippet =
-            snippets.save(
-                Snippet("Saludo", "Saluda a quien ingrese", "printscript", "1.1", "let n: string = readInput(\"?\");", "auth0|ana"),
-            )
+            snippets.save(Snippet("Saludo", "Saluda a quien ingrese", "printscript", "1.1", "auth0|ana"), code, contents)
         Mockito.`when`(permissionClient.roleOf(snippet.id!!, "auth0|ana")).thenReturn(Role.OWNER)
         Mockito.`when`(permissionClient.roleOf(snippet.id!!, "auth0|beto")).thenReturn(Role.READ)
     }
@@ -63,12 +69,12 @@ class TestCaseTest(
         user: String = "auth0|ana",
         snippetId: UUID = snippet.id!!,
     ) = mockMvc.post("/snippets/$snippetId/tests") {
-        header(USER_HEADER, user)
+        with(asUser(user))
         contentType = MediaType.APPLICATION_JSON
         content = body
     }
 
-    private fun list(user: String) = mockMvc.get("/snippets/${snippet.id}/tests") { header(USER_HEADER, user) }
+    private fun list(user: String) = mockMvc.get("/snippets/${snippet.id}/tests") { with(asUser(user)) }
 
     private val greeting = """{"name": "Saluda a dos", "inputs": ["Ana", "Beto"], "outputs": ["Hola Ana", "Hola Beto", "Chau"]}"""
 
@@ -163,5 +169,189 @@ class TestCaseTest(
             status { isForbidden() }
             jsonPath("$.detail") { value("No tenés acceso a este snippet") }
         }
+    }
+
+    // US6: correr un test desde la vista del snippet.
+
+    private fun createdTestId(body: String = greeting): String {
+        val response = create(body).andReturn().response.contentAsString
+        return Regex("\"id\":\"([^\"]+)\"").find(response)!!.groupValues[1]
+    }
+
+    private fun runTest(
+        testId: String,
+        user: String = "auth0|ana",
+        snippetId: UUID = snippet.id!!,
+    ) = mockMvc.post("/snippets/$snippetId/tests/$testId/run") { with(asUser(user)) }
+
+    private fun languageServiceAnswers(outcome: RunOutcome) {
+        Mockito
+            .`when`(languageClient.run(code, "printscript", "1.1", listOf("Ana", "Beto")))
+            .thenReturn(outcome)
+    }
+
+    @Test
+    fun `un test pasa si el snippet imprime exactamente los outputs esperados`() {
+        val testId = createdTestId()
+        languageServiceAnswers(RunOutcome(listOf("Hola Ana", "Hola Beto", "Chau"), error = null))
+
+        runTest(testId).andExpect {
+            status { isOk() }
+            jsonPath("$.passed") { value(true) }
+            jsonPath("$.expected") { value(contains("Hola Ana", "Hola Beto", "Chau")) }
+            jsonPath("$.actual") { value(contains("Hola Ana", "Hola Beto", "Chau")) }
+            jsonPath("$.error") { value(null) }
+        }
+    }
+
+    @Test
+    fun `un test falla si los outputs no coinciden o vienen en otro orden`() {
+        val testId = createdTestId()
+        languageServiceAnswers(RunOutcome(listOf("Hola Beto", "Hola Ana", "Chau"), error = null))
+
+        runTest(testId).andExpect {
+            jsonPath("$.passed") { value(false) }
+            jsonPath("$.actual") { value(contains("Hola Beto", "Hola Ana", "Chau")) }
+        }
+    }
+
+    @Test
+    fun `un test falla si el snippet termina con error, aunque haya impreso lo esperado`() {
+        val testId = createdTestId()
+        languageServiceAnswers(
+            RunOutcome(listOf("Hola Ana", "Hola Beto", "Chau"), CodeError("Division por cero", 4, 9)),
+        )
+
+        runTest(testId).andExpect {
+            jsonPath("$.passed") { value(false) }
+            jsonPath("$.error.rule") { value("Division por cero") }
+            jsonPath("$.error.line") { value(4) }
+        }
+    }
+
+    @Test
+    fun `alguien con quien se compartio el snippet puede correr sus tests`() {
+        val testId = createdTestId()
+        languageServiceAnswers(RunOutcome(listOf("Hola Ana", "Hola Beto", "Chau"), error = null))
+
+        runTest(testId, user = "auth0|beto").andExpect {
+            status { isOk() }
+            jsonPath("$.passed") { value(true) }
+        }
+    }
+
+    @Test
+    fun `alguien sin permisos no puede correr los tests`() {
+        val testId = createdTestId()
+        runTest(testId, user = "auth0|carla").andExpect { status { isForbidden() } }
+        verifyNoInteractions(languageClient)
+    }
+
+    @Test
+    fun `correr un test que no existe es un 404`() {
+        runTest(UUID.randomUUID().toString()).andExpect { status { isNotFound() } }
+    }
+
+    // Editar y borrar un test, desde la UI.
+
+    private fun update(
+        testId: String,
+        body: String,
+        user: String = "auth0|ana",
+    ) = mockMvc.put("/snippets/${snippet.id}/tests/$testId") {
+        with(asUser(user))
+        contentType = MediaType.APPLICATION_JSON
+        content = body
+    }
+
+    private fun delete(
+        testId: String,
+        user: String = "auth0|ana",
+        snippetId: UUID = snippet.id!!,
+    ) = mockMvc.delete("/snippets/$snippetId/tests/$testId") { with(asUser(user)) }
+
+    @Test
+    fun `el owner edita un test y se reemplazan todos sus datos`() {
+        val testId = createdTestId()
+
+        update(testId, """{"name": "Saluda a uno", "inputs": ["Carla"], "outputs": ["Hola Carla"]}""").andExpect {
+            status { isOk() }
+            jsonPath("$.id") { value(testId) }
+            jsonPath("$.name") { value("Saluda a uno") }
+            jsonPath("$.inputs") { value(contains("Carla")) }
+            jsonPath("$.outputs") { value(contains("Hola Carla")) }
+        }
+        list("auth0|ana").andExpect {
+            jsonPath("$.length()") { value(1) }
+            jsonPath("$[0].inputs") { value(contains("Carla")) }
+        }
+    }
+
+    @Test
+    fun `un test editado vuelve a PENDING porque su resultado era de los datos anteriores`() {
+        val testId = createdTestId()
+        languageServiceAnswers(RunOutcome(listOf("Hola Ana", "Hola Beto", "Chau"), error = null))
+        runTest(testId)
+        assertEquals(TestStatus.PASSED, tests.findAll().single().status)
+
+        update(testId, greeting).andExpect { jsonPath("$.status") { value("PENDING") } }
+    }
+
+    @Test
+    fun `alguien con permiso de lectura no puede editar ni borrar tests`() {
+        val testId = createdTestId()
+
+        update(testId, """{"name": "Otro"}""", user = "auth0|beto").andExpect { status { isForbidden() } }
+        delete(testId, user = "auth0|beto").andExpect { status { isForbidden() } }
+        list("auth0|ana").andExpect { jsonPath("$[0].name") { value("Saluda a dos") } }
+    }
+
+    @Test
+    fun `editar un test sin nombre es un 400`() {
+        val testId = createdTestId()
+        update(testId, """{"name": ""}""").andExpect { status { isBadRequest() } }
+    }
+
+    @Test
+    fun `editar un test que no existe es un 404`() {
+        update(UUID.randomUUID().toString(), greeting).andExpect { status { isNotFound() } }
+    }
+
+    @Test
+    fun `el owner borra un test y los demas quedan`() {
+        val testId = createdTestId()
+        create("""{"name": "Otro"}""")
+
+        delete(testId).andExpect { status { isNoContent() } }
+
+        list("auth0|ana").andExpect {
+            jsonPath("$.length()") { value(1) }
+            jsonPath("$[0].name") { value("Otro") }
+        }
+    }
+
+    @Test
+    fun `borrar un test que no existe es un 404`() {
+        delete(UUID.randomUUID().toString()).andExpect { status { isNotFound() } }
+    }
+
+    @Test
+    fun `un test de otro snippet no se puede borrar desde este`() {
+        val testId = createdTestId()
+        val other = snippets.save(Snippet("Otro", "d", "printscript", "1.1", "auth0|ana"), "println(1);", contents)
+        Mockito.`when`(permissionClient.roleOf(other.id!!, "auth0|ana")).thenReturn(Role.OWNER)
+
+        delete(testId, snippetId = other.id!!).andExpect { status { isNotFound() } }
+        assertEquals(1, tests.count())
+    }
+
+    @Test
+    fun `un test de otro snippet no se puede correr desde este`() {
+        val testId = createdTestId()
+        val other = snippets.save(Snippet("Otro", "d", "printscript", "1.1", "auth0|ana"), "println(1);", contents)
+        Mockito.`when`(permissionClient.roleOf(other.id!!, "auth0|ana")).thenReturn(Role.OWNER)
+
+        runTest(testId, snippetId = other.id!!).andExpect { status { isNotFound() } }
+        verifyNoInteractions(languageClient)
     }
 }

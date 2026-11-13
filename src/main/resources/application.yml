@@ -1,3 +1,10 @@
+# En las VMs el navegador llega por HTTPS a nginx, que le pasa el pedido a este servicio por HTTP con
+# X-Forwarded-Proto. Sin esto, el servicio se cree en http://<dominio>:80 y toma el Origin
+# https://<dominio> que el navegador manda en cada POST, PUT y DELETE como otro sitio: CORS lo
+# rechaza con 403. Solo se llega a este servicio por nginx, así que se puede confiar en esos headers.
+server:
+  forward-headers-strategy: framework
+
 spring:
   application:
     name: snippet-service
@@ -9,13 +16,59 @@ spring:
     open-in-view: false
     hibernate:
       ddl-auto: ${DDL_AUTO:update}
+  # Los access tokens los emite Auth0. Los defaults son el tenant de desarrollo y el identifier de
+  # esta API en Auth0; ninguno de los dos es secreto.
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: https://${auth0.domain}/
+          audiences: ${AUTH0_AUDIENCE:https://snippet-searcher/api}
+  # Las colas de snippets a lintear (US15) y a formatear (US12) son streams de Redis.
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
 
 services:
   permission-url: ${PERMISSION_URL:http://localhost:8081}
   language-url: ${LANGUAGE_URL:http://localhost:8082}
+  # El código de los snippets lo guarda asset-service, que lo pone en Azurite.
+  asset-url: ${ASSET_URL:http://localhost:8083}
+
+# El container de asset-service donde va el código, un asset por snippet.
+storage:
+  container: ${ASSET_CONTAINER:snippets}
+
+auth0:
+  domain: ${AUTH0_DOMAIN:dev-2fvmkxju8g70kqvs.us.auth0.com}
+  # La aplicación machine-to-machine con la que se buscan usuarios para compartir (US7), con
+  # read:users en la Management API. El secret no tiene default: va solo en el entorno.
+  management:
+    client-id: ${AUTH0_M2M_CLIENT_ID:}
+    client-secret: ${AUTH0_M2M_CLIENT_SECRET:}
+
+# Origins de otros dominios que pueden llamar a la API desde el navegador, separados por comas.
+cors:
+  allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173}
+
+# Cada cuánto se le pregunta a language-service con qué versión del parser corre: cuando cambia,
+# se vuelven a validar todos los snippets.
+parser:
+  initial-delay: ${PARSER_CHECK_INITIAL_DELAY:30s}
+  check-interval: ${PARSER_CHECK_INTERVAL:5m}
+
+# Cada réplica lee los streams con su propio nombre de consumer: en Docker, HOSTNAME es el id del container.
+streams:
+  consumer: ${HOSTNAME:snippet-service}
 
 management:
   endpoints:
     web:
       exposure:
         include: health
+
+# Cada cuánto se le reporta a New Relic cuántos snippets hay y cuánto espera en los streams de Redis.
+observability:
+  initial-delay: ${OBSERVABILITY_INITIAL_DELAY:1m}
+  interval: ${OBSERVABILITY_INTERVAL:1m}

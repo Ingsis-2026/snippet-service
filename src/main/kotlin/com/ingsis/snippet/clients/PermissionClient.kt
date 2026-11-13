@@ -6,6 +6,7 @@ import org.springframework.stereotype.Component
 import org.springframework.web.client.HttpClientErrorException
 import org.springframework.web.client.RestClient
 import org.springframework.web.client.body
+import java.util.Optional
 import java.util.UUID
 
 enum class Role { OWNER, READ }
@@ -32,12 +33,38 @@ class PermissionClient(
     fun grantOwner(
         snippetId: UUID,
         userId: String,
+    ) = grant(snippetId, userId, Role.OWNER)
+
+    /** US7: el usuario pasa a poder ver el snippet y sus tests. */
+    fun grantRead(
+        snippetId: UUID,
+        userId: String,
+    ) = grant(snippetId, userId, Role.READ)
+
+    private fun grant(
+        snippetId: UUID,
+        userId: String,
+        role: Role,
     ) {
+        try {
+            client
+                .post()
+                .uri("/permissions")
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(PermissionRequest(snippetId, userId, role))
+                .retrieve()
+                .toBodilessEntity()
+        } catch (e: HttpClientErrorException.Conflict) {
+            // permission-service guarda un solo rol por usuario y snippet.
+            throw AlreadyHasAccessException(userId)
+        }
+    }
+
+    /** Se borró el snippet: nadie, ni su owner, tiene más permisos sobre él. */
+    fun revokeAll(snippetId: UUID) {
         client
-            .post()
-            .uri("/permissions")
-            .contentType(MediaType.APPLICATION_JSON)
-            .body(PermissionRequest(snippetId, userId, Role.OWNER))
+            .delete()
+            .uri { it.path("/permissions").queryParam("snippetId", snippetId).build() }
             .retrieve()
             .toBodilessEntity()
     }
@@ -62,4 +89,25 @@ class PermissionClient(
         } catch (e: HttpClientErrorException.NotFound) {
             null
         }
+
+    /** US5: los snippets sobre los que el usuario tiene algún permiso, o solo los de [role]. */
+    fun snippetsOf(
+        userId: String,
+        role: Role?,
+    ): List<UUID> =
+        client
+            .get()
+            .uri {
+                it
+                    .path("/permissions/snippets")
+                    .queryParam("userId", userId)
+                    .queryParamIfPresent("role", Optional.ofNullable(role))
+                    .build()
+            }.retrieve()
+            .body<List<PermissionResponse>>()!!
+            .map { it.snippetId }
 }
+
+class AlreadyHasAccessException(
+    userId: String,
+) : RuntimeException("El usuario $userId ya tiene acceso a este snippet")

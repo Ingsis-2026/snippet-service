@@ -9,15 +9,47 @@ on:
 
 env:
   IMAGE: ghcr.io/ingsis-2026/snippet-service
+  SERVICE: snippet-service
+
+# Un run a la vez por rama: si se mergean varios PRs seguidos, esperan en fila en vez de pisarse.
+concurrency:
+  group: cd-${{ github.event.workflow_run.head_branch }}
+  cancel-in-progress: false
 
 jobs:
-  image:
-    name: Build & Push Docker Image
+  # Si mientras corría CI llegó otro commit a la rama, este ya quedó viejo: lo publica y despliega el CD de ese commit.
+  # Así un run que termina tarde nunca pisa uno más nuevo.
+  latest:
+    name: Check it is the branch's latest commit
     if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push'
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    outputs:
+      is_latest: ${{ steps.check.outputs.is_latest }}
+
+    steps:
+      - name: Compare with the branch tip
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ github.event.workflow_run.head_branch }}
+          SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          TIP=$(gh api "repos/$GITHUB_REPOSITORY/branches/$BRANCH" --jq .commit.sha)
+          if [ "$TIP" = "$SHA" ]; then echo "is_latest=true" >> "$GITHUB_OUTPUT"; else echo "is_latest=false" >> "$GITHUB_OUTPUT"; echo "Skipping: $BRANCH is already at ${TIP::8}"; fi
+
+  image:
+    name: Build & Push Docker Image
+    needs: latest
+    if: needs.latest.outputs.is_latest == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
       packages: write
+    outputs:
+      environment: ${{ steps.target.outputs.environment }}
+      short_sha: ${{ steps.target.outputs.short_sha }}
 
     steps:
       - name: Checkout the commit that passed CI
@@ -53,3 +85,25 @@ jobs:
           tags: |
             ${{ env.IMAGE }}:${{ steps.target.outputs.environment }}
             ${{ env.IMAGE }}:sha-${{ steps.target.outputs.short_sha }}
+
+  # Actualiza solo este servicio en el stack "snippet" de la VM del entorno, con la imagen de este commit.
+  # Apagado hasta que existan las VMs: se prende con la variable DEPLOY_ENABLED=true
+  # y los secretos SSH_HOST, SSH_USERNAME y SSH_KEY en los environments "dev" y "prod".
+  deploy:
+    name: Deploy to VM
+    needs: image
+    if: vars.DEPLOY_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    environment: ${{ needs.image.outputs.environment }}
+
+    steps:
+      - name: Update the service in the Swarm stack
+        uses: appleboy/ssh-action@v1
+        env:
+          TAG: sha-${{ needs.image.outputs.short_sha }}
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USERNAME }}
+          key: ${{ secrets.SSH_KEY }}
+          envs: IMAGE,SERVICE,TAG
+          script: docker service update --with-registry-auth --image "$IMAGE:$TAG" "snippet_$SERVICE"

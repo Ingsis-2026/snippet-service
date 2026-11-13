@@ -26,6 +26,35 @@ internal data class ValidationResult(
     val errors: List<CodeError>,
 )
 
+internal data class RunRequest(
+    val code: String,
+    val language: String,
+    val version: String,
+    val inputs: List<String>,
+)
+
+/** Lo que piden `/format` y `/lint`: el código y las reglas activas, por su nombre en el lenguaje. */
+internal data class RulesRequest(
+    val code: String,
+    val language: String,
+    val version: String,
+    val rules: Map<String, Any>,
+)
+
+internal data class FormatResult(
+    val content: String,
+)
+
+internal data class VersionResult(
+    val printscript: String,
+)
+
+/** Lo que imprimió el código, en orden, y el error que cortó la ejecución si lo hubo. */
+data class RunOutcome(
+    val outputs: List<String>,
+    val error: CodeError?,
+)
+
 @Component
 class LanguageClient(
     builder: RestClient.Builder,
@@ -38,16 +67,53 @@ class LanguageClient(
         code: String,
         language: String,
         version: String,
-    ): List<CodeError> =
+    ): List<CodeError> = post<ValidationResult>("/validate", ValidationRequest(code, language, version)).errors
+
+    /** Ejecuta el código dándole [inputs] en orden. */
+    fun run(
+        code: String,
+        language: String,
+        version: String,
+        inputs: List<String>,
+    ): RunOutcome = post<RunOutcome>("/run", RunRequest(code, language, version, inputs))
+
+    /** Las reglas de lint de [rules] que el código no cumple; vacío si las cumple todas. */
+    fun lint(
+        code: String,
+        language: String,
+        version: String,
+        rules: Map<String, Any>,
+    ): List<CodeError> = post<ValidationResult>("/lint", RulesRequest(code, language, version, rules)).errors
+
+    /** El código con las reglas de formato de [rules] aplicadas. */
+    fun format(
+        code: String,
+        language: String,
+        version: String,
+        rules: Map<String, Any>,
+    ): String = post<FormatResult>("/format", RulesRequest(code, language, version, rules)).content
+
+    /** La versión de la librería de PrintScript con la que language-service valida y lintea ahora. */
+    fun parserVersion(): String =
+        client
+            .get()
+            .uri("/version")
+            .retrieve()
+            .body<VersionResult>()!!
+            .printscript
+
+    private inline fun <reified T : Any> post(
+        path: String,
+        request: Any,
+    ): T =
         try {
             client
                 .post()
-                .uri("/validate")
+                .uri(path)
                 .contentType(MediaType.APPLICATION_JSON)
-                .body(ValidationRequest(code, language, version))
+                .body(request)
                 .retrieve()
-                .body<ValidationResult>()!!
-                .errors
+                .body<T>()!!
         } catch (e: HttpClientErrorException.BadRequest) {
             // language-service responde 400 solo cuando no conoce el lenguaje o la versión.
             val detail = e.getResponseBodyAs(ProblemDetail::class.java)?.detail

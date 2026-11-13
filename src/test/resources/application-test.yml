@@ -6,3 +6,22 @@ spring:
   jpa:
     hibernate:
       ddl-auto: create-drop
+
+# La versión del parser no se consulta sola: los tests llaman a ParserVersionWatcher.check().
+parser:
+  watch:
+    enabled: false
+
+# Los reportes a New Relic no corren solos: los tests llaman a InventoryReporter.report().
+observability:
+  enabled: false
+
+# Sin Redis: las colas son RecordingLintQueue y RecordingFormatQueue, en memoria.
+streams:
+  redis:
+    enabled: false
+
+management:
+  health:
+    redis:
+      enabled: false
