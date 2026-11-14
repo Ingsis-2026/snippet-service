@@ -5,6 +5,8 @@ import com.ingsis.snippet.execution.ExecutionListener
 import com.ingsis.snippet.execution.ExecutionRequest
 import com.ingsis.snippet.execution.LanguageUnavailableException
 import com.ingsis.snippet.execution.WebSocketLanguageExecutor
+import com.ingsis.snippet.observability.REQUEST_ID
+import com.ingsis.snippet.observability.withLogContext
 import jakarta.servlet.ServletContainerInitializer
 import jakarta.servlet.http.HttpServlet
 import jakarta.websocket.Endpoint
@@ -50,6 +52,9 @@ class WebSocketLanguageExecutorTest {
 
     /** El header `Authorization` con que se abrió cada conexión, o "ninguno". */
     private val authorizations = LinkedBlockingQueue<String>()
+
+    /** El header `X-Request-Id` con que se abrió cada conexión, o "ninguno". */
+    private val requestIds = LinkedBlockingQueue<String>()
 
     private val listener =
         object : ExecutionListener {
@@ -137,6 +142,13 @@ class WebSocketLanguageExecutorTest {
                                 ) {
                                     val header = request.headers.entries.firstOrNull { it.key.equals("Authorization", true) }
                                     authorizations.put(header?.value?.single() ?: "ninguno")
+                                    requestIds.put(
+                                        request.headers.entries
+                                            .firstOrNull { it.key.equals("X-Request-Id", true) }
+                                            ?.value
+                                            ?.single()
+                                            ?: "ninguno",
+                                    )
                                 }
                             },
                         ).build(),
@@ -192,6 +204,15 @@ class WebSocketLanguageExecutorTest {
         executor.start(request("espera"), listener)
 
         assertEquals("Bearer token-del-servicio", authorizations.poll(5, TimeUnit.SECONDS))
+    }
+
+    @Test
+    fun `abre la conexion con el id del pedido que se esta atendiendo`() {
+        withLogContext(REQUEST_ID to "pedido-1") { executor.start(request("espera"), listener) }
+        executor.start(request("espera"), listener)
+
+        assertEquals("pedido-1", requestIds.poll(5, TimeUnit.SECONDS))
+        assertEquals("ninguno", requestIds.poll(5, TimeUnit.SECONDS))
     }
 
     @Test
