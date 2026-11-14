@@ -56,6 +56,10 @@ Los dos son idempotentes: se usa el estado actual, no el del momento en que se e
 
 La primera vez que corre no hay versión guardada, así que se validan todos los snippets que ya estaban.
 
+## Tests al actualizar un snippet (US16)
+
+En la misma transacción que el update, todos los tests del snippet vuelven a `PENDING`: el resultado que tenían era del código anterior. Una vez guardado, se corren en otro hilo (`@Async`, con el executor de Spring Boot) y el PUT responde sin esperarlos. Cada test termina `PASSED` o `FAILED`; uno que no se pudo correr queda `PENDING` y no frena a los demás. La UI consulta los tests hasta que ninguno esté `PENDING`.
+
 ## Tareas programadas
 
 Los dos workers de los streams, el barrido de pendientes, el chequeo de la versión del parser y los reportes a New Relic corren en un pool de `SCHEDULING_POOL_SIZE` hilos (4), así una tanda lenta de un worker no frena a los demás. Spring nunca corre dos vueltas de la misma tarea a la vez, y cada tarea tiene su propio estado.

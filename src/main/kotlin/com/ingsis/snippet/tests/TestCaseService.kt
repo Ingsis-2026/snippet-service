@@ -10,6 +10,7 @@ import com.ingsis.snippet.storage.ContentStore
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 import org.springframework.context.event.EventListener
+import org.springframework.scheduling.annotation.Async
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Propagation
 import org.springframework.transaction.annotation.Transactional
@@ -142,10 +143,27 @@ class TestCaseService(
     }
 
     /**
-     * US16: cada vez que se actualiza un snippet se corren todos sus tests. Corre después de que
-     * el update se guardó, en su propia transacción, así que ningún resultado lo modifica ni lo
-     * deshace. Un test que no se pudo correr queda `PENDING` y no frena a los demás.
+     * US16: en la misma transacción que el update, todos los tests del snippet vuelven a `PENDING`,
+     * porque el resultado que tenían era del código anterior. Así, cuando el PUT responde, nadie ve
+     * resultados viejos mientras se corren de nuevo ([runAll]): la UI consulta los tests hasta que
+     * ninguno esté `PENDING`.
      */
+    @EventListener
+    fun markPending(event: SnippetUpdatedEvent) {
+        repository.findAllBySnippetId(event.snippet.id!!).forEach { it.status = TestStatus.PENDING }
+    }
+
+    /**
+     * US16: cada vez que se actualiza un snippet se corren todos sus tests. Corre después de que
+     * el update se guardó, en otro hilo y en su propia transacción: el PUT no espera a que terminen,
+     * y ningún resultado lo modifica ni lo deshace. Cada test queda `PASSED` o `FAILED`; uno que no
+     * se pudo correr queda `PENDING` y no frena a los demás.
+     *
+     * Corre en el executor que arma Spring Boot (`spring.task.execution.*`). Si el owner vuelve a
+     * actualizar el snippet antes de que termine, las dos corridas pueden cruzarse y la del código
+     * anterior terminar última; se arregla con la próxima actualización o corriendo el test a mano.
+     */
+    @Async
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     fun runAll(event: SnippetUpdatedEvent) {
