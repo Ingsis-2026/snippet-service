@@ -1,6 +1,7 @@
 package com.ingsis.snippet
 
 import com.ingsis.snippet.clients.ClientsConfig
+import com.ingsis.snippet.clients.HttpTimeouts
 import com.ingsis.snippet.observability.REQUEST_ID
 import com.ingsis.snippet.observability.REQUEST_ID_HEADER
 import com.ingsis.snippet.observability.withLogContext
@@ -13,7 +14,13 @@ import org.springframework.test.web.client.response.MockRestResponseCreators.wit
 
 /** El id del pedido viaja a permission-service y language-service, pero no a Auth0. */
 class RequestIdForwardingTest {
-    private val builder = ClientsConfig().restClientBuilder("http://permission:8080", "http://language:8080")
+    private val config = ClientsConfig()
+    private val builder =
+        config.restClientBuilder(
+            "http://permission:8080",
+            "http://language:8080",
+            config.timeoutsByService(HttpTimeouts(), "http://language:8080"),
+        )
     private val server = MockRestServiceServer.bindTo(builder).build()
     private val client = builder.build()
 
