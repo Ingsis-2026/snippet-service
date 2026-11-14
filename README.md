@@ -56,6 +56,21 @@ Los dos son idempotentes: se usa el estado actual, no el del momento en que se e
 
 La primera vez que corre no hay versión guardada, así que se validan todos los snippets que ya estaban.
 
+## Scopes
+
+Además de un access token válido para esta API, cada endpoint pide un scope de Auth0. Los dos son permisos de la API `https://snippet-searcher/api` en Auth0, y la UI los pide al loguearse:
+
+| Scope | Endpoints |
+|---|---|
+| `read:snippets` | Todos los `GET`: `/snippets`, `/snippets/{id}`, `/snippets/{id}/tests`, `/snippets/{id}/lint`, `/snippets/{id}/download`, `/rules/linting`, `/rules/formatting`, `/users`. `POST /snippets/{id}/format` (previsualiza el formato, no guarda nada) y `POST /snippets/{id}/tests/{testId}/run` (correr un test). El WebSocket de `/execution`. |
+| `write:snippets` | Todo lo demás: `POST /snippets`, `PUT` y `DELETE /snippets/{id}`, `POST /snippets/{id}/share`, `POST /snippets/{id}/tests`, `PUT` y `DELETE /snippets/{id}/tests/{testId}`, `PUT /rules/linting` y `PUT /rules/formatting`. |
+
+Correr un test deja guardado si pasó, pero es el resultado de correr lo que ya está y lo puede hacer cualquiera que vea el snippet (también por `/execution`): por eso es lectura. La regla es por método (un `GET` es leer, el resto escribir, salvo esos dos `POST`), así un endpoint nuevo queda protegido sin tocar `SecurityConfig`.
+
+Sin token es un 401; con un token al que le falta el scope, un 403 (`insufficient_scope`). `/actuator/health` no pide nada.
+
+Spring lee los scopes del claim `scope` del token, que en Auth0 es un texto separado por espacios, y arma una authority `SCOPE_read:snippets` por cada uno. En Auth0, con RBAC apagado en la API, se le da a la UI todo scope que pida y que exista en la API; con RBAC prendido, solo los que tenga asignados el usuario (por roles o directo).
+
 ## Logs
 
 En Docker (`LOG_FORMAT=ecs`) cada log es una línea de JSON en formato ECS, con el servicio (`service.name`) y el contexto como campos aparte, no metido en el texto del mensaje:
