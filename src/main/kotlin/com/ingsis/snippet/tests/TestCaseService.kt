@@ -3,6 +3,7 @@ package com.ingsis.snippet.tests
 import com.ingsis.snippet.clients.CodeError
 import com.ingsis.snippet.clients.LanguageClient
 import com.ingsis.snippet.clients.RunOutcome
+import com.ingsis.snippet.observability.withLogContext
 import com.ingsis.snippet.snippets.SnippetAccess
 import com.ingsis.snippet.snippets.SnippetDeletedEvent
 import com.ingsis.snippet.snippets.SnippetUpdatedEvent
@@ -12,10 +13,11 @@ import org.slf4j.LoggerFactory
 import org.springframework.context.event.EventListener
 import org.springframework.scheduling.annotation.Async
 import org.springframework.stereotype.Service
-import org.springframework.transaction.annotation.Propagation
+import org.springframework.transaction.PlatformTransactionManager
 import org.springframework.transaction.annotation.Transactional
 import org.springframework.transaction.event.TransactionPhase
 import org.springframework.transaction.event.TransactionalEventListener
+import org.springframework.transaction.support.TransactionTemplate
 import java.util.UUID
 
 data class TestCaseData(
@@ -53,7 +55,11 @@ class TestCaseService(
     private val access: SnippetAccess,
     private val contents: ContentStore,
     private val languageClient: LanguageClient,
+    transactionManager: PlatformTransactionManager,
 ) {
+    /** Para leer los tests a correr: sus inputs y outputs se cargan de forma perezosa. */
+    private val readOnly = TransactionTemplate(transactionManager).apply { isReadOnly = true }
+
     /**
      * Solo el owner crea tests (US8). No se corre el snippet para verificarlos: un test
      * "inválido", cuyos outputs no son los que el snippet produce, también se guarda.
@@ -122,6 +128,8 @@ class TestCaseService(
             addAll(data.outputs)
         }
         test.status = TestStatus.PENDING
+        // Si se estaba corriendo por un update del snippet, era con los inputs y outputs anteriores.
+        test.pendingRun = null
         return test.toResponse()
     }
 
@@ -147,33 +155,54 @@ class TestCaseService(
      * porque el resultado que tenían era del código anterior. Así, cuando el PUT responde, nadie ve
      * resultados viejos mientras se corren de nuevo ([runAll]): la UI consulta los tests hasta que
      * ninguno esté `PENDING`.
+     *
+     * Cada test queda esperando el resultado de la corrida de este update ([SnippetUpdatedEvent.revision]):
+     * si había otra en curso, por un update anterior, ya no va a poder guardar el suyo.
      */
     @EventListener
     fun markPending(event: SnippetUpdatedEvent) {
-        repository.findAllBySnippetId(event.snippet.id!!).forEach { it.status = TestStatus.PENDING }
+        repository.findAllBySnippetId(event.snippet.id!!).forEach {
+            it.status = TestStatus.PENDING
+            it.pendingRun = event.revision
+        }
     }
 
     /**
      * US16: cada vez que se actualiza un snippet se corren todos sus tests. Corre después de que
-     * el update se guardó, en otro hilo y en su propia transacción: el PUT no espera a que terminen,
-     * y ningún resultado lo modifica ni lo deshace. Cada test queda `PASSED` o `FAILED`; uno que no
-     * se pudo correr queda `PENDING` y no frena a los demás.
+     * el update se guardó, en otro hilo: el PUT no espera a que terminen, y ningún resultado lo
+     * modifica ni lo deshace. Cada test queda `PASSED` o `FAILED`; uno que no se pudo correr queda
+     * `PENDING` y no frena a los demás.
      *
-     * Corre en el executor que arma Spring Boot (`spring.task.execution.*`). Si el owner vuelve a
-     * actualizar el snippet antes de que termine, las dos corridas pueden cruzarse y la del código
-     * anterior terminar última; se arregla con la próxima actualización o corriendo el test a mano.
+     * Si el owner vuelve a actualizar el snippet antes de que termine, las dos corridas se cruzan: cada
+     * una corre su versión del código. Para que la del código anterior no pise a la del nuevo, cada
+     * resultado se guarda solo si el test sigue esperando el de esta corrida ([TestCaseRepository.recordRun]);
+     * si no, se descarta. Lo mismo si se editó el test mientras corría. Cada resultado se guarda en su
+     * propia transacción, así la UI ve cada test a medida que termina y no se traban filas mientras se
+     * espera a language-service.
+     *
+     * Corre en el executor que arma Spring Boot (`spring.task.execution.*`).
      */
     @Async
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
     fun runAll(event: SnippetUpdatedEvent) {
         val snippet = event.snippet
-        for (test in repository.findAllBySnippetId(snippet.id!!)) {
-            try {
-                test.record(languageClient.run(event.content, snippet.language, snippet.version, test.inputs.toList()))
-            } catch (e: RuntimeException) {
-                log.warn("No se pudo correr el test ${test.id} del snippet ${snippet.id}", e)
-                test.status = TestStatus.PENDING
+        val pending =
+            readOnly.execute {
+                repository
+                    .findAllBySnippetIdAndPendingRun(snippet.id!!, event.revision)
+                    .map { TestToRun(it.id!!, it.inputs.toList(), it.outputs.toList()) }
+            }!!
+        for (test in pending) {
+            withLogContext("snippetId" to snippet.id, "testId" to test.id) {
+                try {
+                    val outcome = languageClient.run(event.content, snippet.language, snippet.version, test.inputs)
+                    val status = if (outcome.passes(test.expected)) TestStatus.PASSED else TestStatus.FAILED
+                    if (repository.recordRun(test.id, event.revision, status) == 0) {
+                        log.info("Se descartó el resultado del test: el snippet o el test cambiaron mientras corría")
+                    }
+                } catch (e: RuntimeException) {
+                    log.warn("No se pudo correr el test", e)
+                }
             }
         }
     }

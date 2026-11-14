@@ -87,6 +87,8 @@ El contexto va en el MDC (`withLogContext`) y no en key-values de SLF4J porque e
 
 En la misma transacción que el update, todos los tests del snippet vuelven a `PENDING`: el resultado que tenían era del código anterior. Una vez guardado, se corren en otro hilo (`@Async`, con el executor de Spring Boot) y el PUT responde sin esperarlos. Cada test termina `PASSED` o `FAILED`; uno que no se pudo correr queda `PENDING` y no frena a los demás. La UI consulta los tests hasta que ninguno esté `PENDING`.
 
+Si el owner actualiza dos veces seguidas, las dos corridas pueden cruzarse y la del código anterior terminar última. Para que no pise a la del nuevo, cada update tiene un id (`revision`) que, en la misma transacción, queda guardado en cada test (`pending_run`) como la corrida de la que se espera el resultado. Cada resultado se guarda con un `UPDATE` condicional: solo si el test todavía espera esa corrida. El de una corrida vieja se descarta, y lo mismo si se editó el test mientras corría (editarlo borra `pending_run`). Cada resultado se guarda en su propia transacción, así la UI ve cada test a medida que termina.
+
 ## Tareas programadas
 
 Los dos workers de los streams, el barrido de pendientes, el chequeo de la versión del parser y los reportes a New Relic corren en un pool de `SCHEDULING_POOL_SIZE` hilos (4), así una tanda lenta de un worker no frena a los demás. Spring nunca corre dos vueltas de la misma tarea a la vez, y cada tarea tiene su propio estado.

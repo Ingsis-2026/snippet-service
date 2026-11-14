@@ -13,6 +13,7 @@ import com.ingsis.snippet.tests.TestCaseRepository
 import com.ingsis.snippet.tests.TestStatus
 import org.awaitility.kotlin.atMost
 import org.awaitility.kotlin.await
+import org.awaitility.kotlin.until
 import org.awaitility.kotlin.untilAsserted
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
@@ -23,9 +24,11 @@ import org.mockito.Mockito
 import org.mockito.Mockito.never
 import org.mockito.Mockito.verify
 import org.springframework.beans.factory.annotation.Autowired
+import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc
 import org.springframework.http.MediaType
+import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor
 import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.context.bean.override.mockito.MockitoBean
 import org.springframework.test.web.servlet.MockMvc
@@ -37,6 +40,7 @@ import java.time.Duration
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 
 /**
  * US16: al modificar un snippet se corren todos sus tests. Corren en otro hilo, después de que el
@@ -50,6 +54,7 @@ class AutomaticTestsTest(
     @Autowired private val snippets: SnippetRepository,
     @Autowired private val tests: TestCaseRepository,
     @Autowired private val contents: ContentStore,
+    @Autowired @Qualifier("applicationTaskExecutor") private val executor: ThreadPoolTaskExecutor,
 ) {
     @MockitoBean
     private lateinit var languageClient: LanguageClient
@@ -201,5 +206,63 @@ class AutomaticTestsTest(
         }
 
         assertEquals(TestStatus.FAILED, statusOf(ana))
+    }
+
+    /** Espera a que no quede ninguna corrida en segundo plano, ni siquiera una cuyo resultado se descarta. */
+    private fun allRunsFinished() {
+        await atMost Duration.ofSeconds(5) until { executor.activeCount == 0 }
+    }
+
+    @Test
+    fun `si se actualiza dos veces seguidas quedan los resultados del codigo nuevo, aunque la corrida vieja termine ultima`() {
+        val first = "println(\"Chau\");"
+        val firstRunStarted = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        // Con el primer código, Ana falla y Beto pasa: lo contrario que con el segundo.
+        for (name in listOf("Ana", "Beto")) {
+            Mockito.`when`(languageClient.run(first, "printscript", "1.1", listOf(name))).thenAnswer {
+                firstRunStarted.countDown()
+                release.await(5, TimeUnit.SECONDS)
+                RunOutcome(listOf("Chau $name"), null)
+            }
+        }
+
+        update(first).andExpect { status { isOk() } }
+        assertTrue(firstRunStarted.await(5, TimeUnit.SECONDS))
+        update(updated).andExpect { status { isOk() } }
+        eventually(ana to TestStatus.PASSED, beto to TestStatus.FAILED)
+        release.countDown()
+        allRunsFinished()
+
+        // La corrida del primer código terminó, pero sus resultados no se guardaron.
+        verify(languageClient).run(first, "printscript", "1.1", listOf("Ana"))
+        verify(languageClient).run(first, "printscript", "1.1", listOf("Beto"))
+        assertEquals(TestStatus.PASSED, statusOf(ana))
+        assertEquals(TestStatus.FAILED, statusOf(beto))
+    }
+
+    @Test
+    fun `si editan el test mientras corre no se guarda el resultado de sus inputs anteriores`() {
+        val started = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        Mockito.`when`(languageClient.run(updated, "printscript", "1.1", listOf("Ana"))).thenAnswer {
+            started.countDown()
+            release.await(5, TimeUnit.SECONDS)
+            RunOutcome(listOf("Hola Ana"), null)
+        }
+
+        update().andExpect { status { isOk() } }
+        assertTrue(started.await(5, TimeUnit.SECONDS))
+        mockMvc
+            .put("/snippets/${snippet.id}/tests/${ana.id}") {
+                with(asUser("auth0|ana"))
+                contentType = MediaType.APPLICATION_JSON
+                content = """{"name": "Saluda a Ana", "inputs": ["Ana"], "outputs": ["Chau Ana"]}"""
+            }.andExpect { status { isOk() } }
+        release.countDown()
+        allRunsFinished()
+
+        assertEquals(TestStatus.PENDING, statusOf(ana))
+        assertEquals(TestStatus.FAILED, statusOf(beto))
     }
 }
