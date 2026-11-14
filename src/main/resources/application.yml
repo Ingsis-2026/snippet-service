@@ -29,6 +29,13 @@ spring:
     redis:
       host: ${REDIS_HOST:localhost}
       port: ${REDIS_PORT:6379}
+  # Las tareas programadas (los dos workers de los streams, el barrido de pendientes, la versión del
+  # parser y los reportes a New Relic) corren en paralelo: con un solo hilo, una tanda lenta de
+  # formateos frenaba el linteo y todo lo demás. Spring nunca corre dos vueltas de la misma tarea a la vez.
+  task:
+    scheduling:
+      pool:
+        size: ${SCHEDULING_POOL_SIZE:4}
 
 services:
   permission-url: ${PERMISSION_URL:http://localhost:8081}
@@ -72,3 +79,10 @@ management:
 observability:
   initial-delay: ${OBSERVABILITY_INITIAL_DELAY:1m}
   interval: ${OBSERVABILITY_INTERVAL:1m}
+
+# Cada cuánto se buscan snippets que quedaron PENDING sin un mensaje que los vaya a lintear, y cuánto
+# tienen que llevar así para volver a encolarlos.
+linting:
+  sweep:
+    interval: ${LINT_SWEEP_INTERVAL:5m}
+    stuck-after: ${LINT_SWEEP_STUCK_AFTER:10m}

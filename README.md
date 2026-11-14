@@ -8,7 +8,7 @@ Parte de **Snippet Searcher** (Ingeniería de Sistemas 2026). Es el servicio al 
 - **Código de cada snippet**, en el [asset-service](https://github.com/austral-ingsis/asset-service) de la cátedra: un asset por snippet en el container `snippets`, que se llama como su id. asset-service lo guarda en Azure Blob Storage; en local y en las VMs es Azurite, el emulador de Azure Storage. snippet-service no habla con Azurite.
 - **Tests de cada snippet**: inputs y outputs esperados (US8). Correrlos es trabajo de `language-service`.
 - **Reglas de lint y formato elegidas por cada usuario** (US11, US14). Se le pasan a `language-service` en cada llamada.
-- **Estado de validez de cada snippet** (`PENDING` / `COMPLIANT` / `NOT_COMPLIANT` / `INVALID`), persistido, para poder filtrar y ordenar por él (US5).
+- **Estado de validez de cada snippet** (`PENDING` / `COMPLIANT` / `NOT_COMPLIANT` / `INVALID` / `ERROR`), persistido, para poder filtrar y ordenar por él (US5).
 - **Las colas de snippets a lintear (US15) y a formatear (US12)**, en streams de Redis. Ver [Linteo y formateo automáticos](#linteo-y-formateo-automáticos).
 
 ## De qué no es dueño
@@ -36,7 +36,12 @@ Lo mismo pasa al crear o actualizar un snippet: se encola para lintearlo.
 
 **Por qué dos streams y no uno con el tipo de trabajo.** Formatear es lo más pesado y cada formateo termina encolando un linteo: en un solo stream, una tanda grande de formateos dejaría esperando detrás suyo el linteo de un snippet recién creado. Con uno por tipo, cada worker avanza por su cuenta, el backlog y los pendientes de cada uno se ven por separado (`XLEN`, `XPENDING`), y el mensaje sigue siendo solo el id del snippet. El worker es el mismo código para los dos (`RedisSnippetWorker`); solo cambia qué hace con cada snippet.
 
-**Tolerancia a fallos.** Un mensaje que falla, o que quedó a medias porque se cayó el servicio, sigue pendiente en Redis. Pasado `streams.retry-after` (1 minuto) lo retoma cualquier réplica (`XCLAIM`). Después de `streams.max-attempts` entregas (3) se saltea: se confirma sin procesar para no frenar al resto. Un snippet que no se pudo lintear queda `PENDING`; uno que no se pudo formatear queda con el código que tenía.
+**Tolerancia a fallos.** No es lo mismo que falle el snippet que algo de lo que depende.
+
+- **Falla el snippet** (por ejemplo, language-service responde 4xx). El mensaje sigue pendiente en Redis, igual que uno que quedó a medias porque se cayó el servicio. Pasado `streams.retry-after` (1 minuto) lo retoma cualquier réplica (`XCLAIM`). Al fallar `streams.max-attempts` veces (3) se saltea: se confirma sin procesar para no frenar al resto. Un snippet que no se pudo lintear queda `ERROR` («no se pudo evaluar»); uno que no se pudo formatear queda con el código que tenía.
+- **Falla una dependencia**: language-service o asset-service no responden, responden 5xx o 429, o no hay conexión con la base o Redis. No es culpa del snippet, así que no se le gasta un intento: se lo vuelve a agregar al final del stream y se confirma la copia vieja, lo mismo que con los que quedaban de la tanda. El worker deja de leer por `streams.backoff` (10 s), y cada falla seguida duplica la pausa hasta `streams.max-backoff` (5 minutos). Los mensajes postergados llevan, además de `snippetId`, los campos `attempts` (intentos fallidos de las copias anteriores) y `deferrals` (cuántas veces se lo postergó). Para que un snippet que hace responder 500 a language-service no se postergue para siempre, después de `streams.max-deferrals` (20) postergaciones también se saltea.
+
+Encolar pasa después de guardar el cambio, fuera de la transacción: si Redis no responde en ese momento, o el servicio se cae a mitad de camino, el snippet queda `PENDING` sin un mensaje que lo vaya a lintear. Cada `linting.sweep.interval` (5 minutos) se vuelven a encolar los que llevan más de `linting.sweep.stuck-after` (10 minutos) `PENDING`; para eso cada snippet guarda desde cuándo está en su estado (`status_changed_at`). El formateo no tiene un estado pendiente ni este barrido: si se pierde un formateo, el snippet sigue con su código, que es válido, y se lo puede descargar formateado con las reglas nuevas (US13).
 
 Los dos son idempotentes: se usa el estado actual, no el del momento en que se encoló, y formatear código ya formateado no lo cambia. Por eso da igual que un snippet se procese dos veces o en otro orden. Si se corta entre guardar el código formateado y encolarlo para lintear, el reintento lo encola igual, porque el snippet ya quedó `PENDING`.
 
@@ -50,6 +55,10 @@ Los dos son idempotentes: se usa el estado actual, no el del momento en que se e
 4. Recién cuando quedaron todos encolados se guarda la versión nueva. Si algo falla antes, la próxima vuelta lo hace de nuevo: encolar dos veces no cambia nada, porque lintear es idempotente.
 
 La primera vez que corre no hay versión guardada, así que se validan todos los snippets que ya estaban.
+
+## Tareas programadas
+
+Los dos workers de los streams, el barrido de pendientes, el chequeo de la versión del parser y los reportes a New Relic corren en un pool de `SCHEDULING_POOL_SIZE` hilos (4), así una tanda lenta de un worker no frena a los demás. Spring nunca corre dos vueltas de la misma tarea a la vez, y cada tarea tiene su propio estado.
 
 ## Correr en local
 
@@ -69,6 +78,8 @@ Necesita su Postgres, asset-service (con su Azurite) y Redis. Lo más simple es 
 | `AUTH0_DOMAIN` / `AUTH0_AUDIENCE` | `dev-2fvmkxju8g70kqvs.us.auth0.com` / `https://snippet-searcher/api`. El tenant de Auth0 que emite los access tokens y el identifier de esta API en ese tenant. No son secretos. |
 | `AUTH0_M2M_CLIENT_ID` / `AUTH0_M2M_CLIENT_SECRET` | Vacíos. La aplicación machine-to-machine de Auth0 con `read:users` en la Management API, para buscar con quién compartir (US7). Sin ellos, `GET /users` responde 503 y el resto anda igual. **El secret nunca se commitea.** |
 | `CORS_ALLOWED_ORIGINS` | `http://localhost:5173`. Origins de otros dominios que pueden llamar a la API desde el navegador, separados por comas. La UI desplegada no lo necesita: llama a `/api` en su mismo dominio. |
+| `SCHEDULING_POOL_SIZE` | `4`. Cuántos hilos tienen las tareas programadas (ver [Tareas programadas](#tareas-programadas)). |
+| `LINT_SWEEP_INTERVAL` / `LINT_SWEEP_STUCK_AFTER` | `5m` / `10m`. Cada cuánto se buscan snippets `PENDING` sin un mensaje que los vaya a lintear, y cuánto tienen que llevar así para volver a encolarlos. |
 
 ## Calidad
 

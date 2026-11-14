@@ -54,7 +54,7 @@ interface ParserVersionRepository : JpaRepository<ParserVersion, Int> {
  * nueva no acepta quedan `INVALID`.
  *
  * Es el mismo mecanismo que cuando un usuario cambia sus reglas de lint, con la misma tolerancia
- * a fallos: cada snippet es un mensaje que se reintenta, y se saltea si sigue fallando.
+ * a fallos: cada snippet es un mensaje que se reintenta, y si sigue fallando se saltea y queda `ERROR`.
  */
 @Component
 class ParserVersionWatcher(
