@@ -1,15 +1,18 @@
 package com.ingsis.snippet.execution
 
+import com.ingsis.snippet.auth.ServiceToken
 import com.ingsis.snippet.clients.CodeError
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.stereotype.Component
 import org.springframework.web.socket.CloseStatus
 import org.springframework.web.socket.TextMessage
+import org.springframework.web.socket.WebSocketHttpHeaders
 import org.springframework.web.socket.WebSocketSession
 import org.springframework.web.socket.client.standard.StandardWebSocketClient
 import org.springframework.web.socket.handler.ConcurrentWebSocketSessionDecorator
 import org.springframework.web.socket.handler.TextWebSocketHandler
 import tools.jackson.databind.json.JsonMapper
+import java.net.URI
 import java.util.concurrent.TimeUnit
 
 /**
@@ -72,15 +75,17 @@ internal data class LanguageMessage(
 
 /**
  * [LanguageExecutor] sobre el WebSocket `/execution` de language-service: una conexión por
- * ejecución. Los mensajes son los mismos que los de [ExecutionHandler], sin el token: entre los
- * servicios no hay usuarios.
+ * ejecución. Los mensajes son los mismos que los de [ExecutionHandler], sin el token del usuario:
+ * la conexión se abre con el token machine-to-machine del servicio ([ServiceToken]) en el header
+ * `Authorization`, que este cliente sí puede mandar (el navegador no).
  */
 @Component
 class WebSocketLanguageExecutor(
     @Value("\${services.language-url}") languageUrl: String,
     private val jsonMapper: JsonMapper,
+    private val serviceToken: ServiceToken,
 ) : LanguageExecutor {
-    private val url = languageUrl.replaceFirst(Regex("^http"), "ws") + "/execution"
+    private val url = URI(languageUrl.replaceFirst(Regex("^http"), "ws") + "/execution")
     private val client = StandardWebSocketClient()
 
     override fun start(
@@ -90,7 +95,8 @@ class WebSocketLanguageExecutor(
         val relay = Relay(listener)
         val session =
             try {
-                client.execute(relay, url).get(CONNECT_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                val headers = WebSocketHttpHeaders().apply { serviceToken.get()?.let { setBearerAuth(it) } }
+                client.execute(relay, headers, url).get(CONNECT_TIMEOUT_SECONDS, TimeUnit.SECONDS)
             } catch (e: Exception) {
                 throw LanguageUnavailableException(e)
             }

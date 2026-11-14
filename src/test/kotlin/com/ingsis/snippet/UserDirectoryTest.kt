@@ -1,5 +1,6 @@
 package com.ingsis.snippet
 
+import com.ingsis.snippet.auth.Auth0ClientCredentials
 import com.ingsis.snippet.users.UserDirectory
 import com.ingsis.snippet.users.UserSummary
 import com.ingsis.snippet.users.UsersUnavailableException
@@ -31,7 +32,8 @@ class UserDirectoryTest {
     private val builder = RestClient.builder()
     private val server = MockRestServiceServer.bindTo(builder).build()
     private val clock = MutableClock(Instant.parse("2026-11-03T12:00:00Z"))
-    private val directory = UserDirectory(builder, "tenant.auth0.com", "m2m-id", "m2m-secret", clock)
+    private val directory =
+        UserDirectory(builder, "tenant.auth0.com", Auth0ClientCredentials(builder, "tenant.auth0.com", "m2m-id", "m2m-secret", clock))
 
     private val ana = """{"user_id": "auth0|ana", "name": "Ana", "email": "ana@mail.com"}"""
 
@@ -140,7 +142,7 @@ class UserDirectoryTest {
 
     @Test
     fun `sin la aplicacion machine-to-machine configurada no se busca`() {
-        val unconfigured = UserDirectory(builder, "tenant.auth0.com", "", "", clock)
+        val unconfigured = UserDirectory(builder, "tenant.auth0.com", Auth0ClientCredentials(builder, "tenant.auth0.com", "", "", clock))
 
         val error = assertFailsWith<UsersUnavailableException> { unconfigured.search("ana", "auth0|beto", 0, 5) }
 

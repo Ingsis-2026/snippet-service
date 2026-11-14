@@ -1,5 +1,7 @@
 package com.ingsis.snippet.clients
 
+import com.ingsis.snippet.auth.ServiceToken
+import com.ingsis.snippet.auth.authenticatedWith
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.http.MediaType
 import org.springframework.stereotype.Component
@@ -27,8 +29,9 @@ internal data class PermissionResponse(
 class PermissionClient(
     builder: RestClient.Builder,
     @Value("\${services.permission-url}") baseUrl: String,
+    serviceToken: ServiceToken,
 ) {
-    private val client = builder.baseUrl(baseUrl).build()
+    private val client = builder.baseUrl(baseUrl).authenticatedWith(serviceToken).build()
 
     fun grantOwner(
         snippetId: UUID,
