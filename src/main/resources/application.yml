@@ -42,11 +42,14 @@ storage:
 
 auth0:
   domain: ${AUTH0_DOMAIN:dev-2fvmkxju8g70kqvs.us.auth0.com}
-  # La aplicación machine-to-machine con la que se buscan usuarios para compartir (US7), con
-  # read:users en la Management API. El secret no tiene default: va solo en el entorno.
+  # La aplicación machine-to-machine del servicio. Con read:users en la Management API busca usuarios
+  # para compartir (US7), y autorizada en la API interna pide el token con el que llama a
+  # permission-service y language-service. El secret no tiene default: va solo en el entorno.
   management:
     client-id: ${AUTH0_M2M_CLIENT_ID:}
     client-secret: ${AUTH0_M2M_CLIENT_SECRET:}
+  # El identifier de la API interna en Auth0: la audience que validan permission-service y language-service.
+  internal-audience: ${AUTH0_INTERNAL_AUDIENCE:https://snippet-searcher/internal}
 
 # Origins de otros dominios que pueden llamar a la API desde el navegador, separados por comas.
 cors:
