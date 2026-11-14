@@ -3,6 +3,8 @@ package com.ingsis.snippet.execution
 import com.ingsis.snippet.CorsProperties
 import com.ingsis.snippet.clients.CodeError
 import com.ingsis.snippet.clients.RunOutcome
+import com.ingsis.snippet.observability.USER
+import com.ingsis.snippet.observability.withLogContext
 import com.ingsis.snippet.snippets.NoAccessException
 import com.ingsis.snippet.snippets.SnippetAccess
 import com.ingsis.snippet.snippets.SnippetNotFoundException
@@ -171,7 +173,7 @@ class ExecutionHandler(
         } catch (e: LanguageUnavailableException) {
             fail(run, e.message!!)
         } catch (e: RuntimeException) {
-            log.error("No se pudo empezar la ejecución del snippet $snippetId", e)
+            withLogContext(USER to userId, "snippetId" to snippetId) { log.error("No se pudo empezar la ejecución del snippet", e) }
             fail(run, "No se pudo empezar la ejecución")
         }
     }
@@ -241,7 +243,7 @@ class ExecutionHandler(
             try {
                 tests.record(snippetId, test.id, outcome)
             } catch (e: RuntimeException) {
-                log.warn("No se pudo guardar el resultado del test ${test.id} del snippet $snippetId", e)
+                withLogContext("snippetId" to snippetId, "testId" to test.id) { log.warn("No se pudo guardar el resultado del test", e) }
             }
             return outcome.passes(test.expected)
         }

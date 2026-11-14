@@ -72,3 +72,14 @@ management:
 observability:
   initial-delay: ${OBSERVABILITY_INITIAL_DELAY:1m}
   interval: ${OBSERVABILITY_INTERVAL:1m}
+
+# Con LOG_FORMAT=ecs, como en la imagen de Docker, los logs salen en JSON (Elastic Common Schema): una línea por
+# log con el servicio (service.name), el MDC (requestId, user...) y el stack trace como campos. Sin LOG_FORMAT
+# salen en texto, que es lo cómodo para leerlos corriendo desde el IDE o en los tests; el MDC va entre corchetes
+# antes del logger (el replace saca los corchetes vacíos de los logs que no tienen contexto).
+logging:
+  structured:
+    format:
+      console: ${LOG_FORMAT:}
+  pattern:
+    correlation: '%replace([%mdc] ){''^\[\] $'', ''''}'

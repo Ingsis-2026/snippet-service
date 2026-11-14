@@ -51,6 +51,18 @@ Los dos son idempotentes: se usa el estado actual, no el del momento en que se e
 
 La primera vez que corre no hay versión guardada, así que se validan todos los snippets que ya estaban.
 
+## Logs
+
+En Docker (`LOG_FORMAT=ecs`) cada log es una línea de JSON en formato ECS, con el servicio (`service.name`) y el contexto como campos aparte, no metido en el texto del mensaje:
+
+- `requestId`: el id del pedido. Lo pone nginx en el header `X-Request-Id`; si no viene (llamando directo al servicio), se genera uno. Vuelve en la respuesta y se le pasa a permission-service y language-service en cada llamado, así sus logs del mismo pedido tienen el mismo id. También viaja en los mensajes de los streams: los logs del linteo o el formateo en segundo plano llevan el id del pedido que lo encoló.
+- `user`: el `sub` del access token, una vez que Spring Security lo validó. En New Relic, la transacción queda con `enduser.id`.
+- Lo propio de cada log: `snippetId`, `stream`, `testId`...
+
+Un error inesperado, o un servicio interno que falló (el 502), va en ERROR con el stack trace mientras el MDC todavía tiene el `requestId`.
+
+El contexto va en el MDC (`withLogContext`) y no en key-values de SLF4J porque el agente de New Relic reenvía el MDC (como `context.requestId`, etc.) pero no los key-values. Nunca se loguean tokens, secrets ni el código de los snippets.
+
 ## Correr en local
 
 Necesita su Postgres, asset-service (con su Azurite) y Redis. Lo más simple es levantarlos desde el repo [`infra`](https://github.com/Ingsis-2026/infra) con `docker compose up -d snippet-db asset-service redis`.
@@ -69,6 +81,7 @@ Necesita su Postgres, asset-service (con su Azurite) y Redis. Lo más simple es 
 | `AUTH0_DOMAIN` / `AUTH0_AUDIENCE` | `dev-2fvmkxju8g70kqvs.us.auth0.com` / `https://snippet-searcher/api`. El tenant de Auth0 que emite los access tokens y el identifier de esta API en ese tenant. No son secretos. |
 | `AUTH0_M2M_CLIENT_ID` / `AUTH0_M2M_CLIENT_SECRET` | Vacíos. La aplicación machine-to-machine de Auth0 con `read:users` en la Management API, para buscar con quién compartir (US7). Sin ellos, `GET /users` responde 503 y el resto anda igual. **El secret nunca se commitea.** |
 | `CORS_ALLOWED_ORIGINS` | `http://localhost:5173`. Origins de otros dominios que pueden llamar a la API desde el navegador, separados por comas. La UI desplegada no lo necesita: llama a `/api` en su mismo dominio. |
+| `LOG_FORMAT` | Vacío: logs en texto, para leerlos en la consola del IDE o en los tests, con el contexto entre corchetes (`[requestId=…, user=…]`). La imagen de Docker trae `ecs`: un JSON por línea (ver [Logs](#logs)). |
 
 ## Calidad
 

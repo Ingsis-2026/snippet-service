@@ -1,6 +1,7 @@
 package com.ingsis.snippet.streams
 
 import com.ingsis.snippet.observability.Telemetry
+import com.ingsis.snippet.observability.withLogContext
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 import org.springframework.dao.DataAccessException
@@ -31,7 +32,7 @@ class StreamBacklogReporter(
             try {
                 telemetry.recordEvent(BACKLOG_EVENT, backlogOf(stream))
             } catch (e: DataAccessException) {
-                log.warn("No se pudo medir el stream $stream de Redis: ${e.message}")
+                withLogContext("stream" to stream) { log.warn("No se pudo medir el stream de Redis: ${e.message}") }
             }
         }
     }

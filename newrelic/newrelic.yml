@@ -16,11 +16,14 @@ common: &default_settings
   span_events:
     enabled: true
 
-  # Los logs llegan a New Relic con el trace.id del pedido: desde un trace se ven sus logs.
+  # Los logs llegan a New Relic con el trace.id del pedido: desde un trace se ven sus logs. Con context_data
+  # llega también el MDC (requestId, user...), como atributos context.<clave> que se pueden filtrar.
   application_logging:
     enabled: true
     forwarding:
       enabled: true
+      context_data:
+        enabled: true
     metrics:
       enabled: true
     local_decorating:
