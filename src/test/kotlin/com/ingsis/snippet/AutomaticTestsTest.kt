@@ -11,6 +11,9 @@ import com.ingsis.snippet.storage.ContentStore
 import com.ingsis.snippet.tests.TestCase
 import com.ingsis.snippet.tests.TestCaseRepository
 import com.ingsis.snippet.tests.TestStatus
+import org.awaitility.kotlin.atMost
+import org.awaitility.kotlin.await
+import org.awaitility.kotlin.untilAsserted
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -30,9 +33,15 @@ import org.springframework.test.web.servlet.get
 import org.springframework.test.web.servlet.post
 import org.springframework.test.web.servlet.put
 import org.springframework.web.client.ResourceAccessException
+import java.time.Duration
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import kotlin.test.assertEquals
 
-/** US16: al modificar un snippet se corren todos sus tests. */
+/**
+ * US16: al modificar un snippet se corren todos sus tests. Corren en otro hilo, después de que el
+ * PUT respondió: los tests esperan a que terminen.
+ */
 @SpringBootTest
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
@@ -86,6 +95,15 @@ class AutomaticTestsTest(
 
     private fun statusOf(test: TestCase) = tests.findById(test.id!!).get().status
 
+    /** Espera a que la corrida en segundo plano deje a cada test como se espera. */
+    private fun eventually(vararg expected: Pair<TestCase, TestStatus>) {
+        await atMost Duration.ofSeconds(5) untilAsserted {
+            expected.forEach { (test, status) -> assertEquals(status, statusOf(test), test.name) }
+        }
+    }
+
+    private fun recordRuns(vararg cases: TestCase) = cases.forEach { tests.save(it.apply { status = TestStatus.PASSED }) }
+
     @Test
     fun `un test nuevo arranca sin correr`() {
         assertEquals(TestStatus.PENDING, statusOf(ana))
@@ -95,13 +113,30 @@ class AutomaticTestsTest(
     fun `al actualizar el snippet se corren todos sus tests y queda si pasaron o fallaron`() {
         update().andExpect { status { isOk() } }
 
-        assertEquals(TestStatus.PASSED, statusOf(ana))
-        assertEquals(TestStatus.FAILED, statusOf(beto))
+        eventually(ana to TestStatus.PASSED, beto to TestStatus.FAILED)
+    }
+
+    @Test
+    fun `el PUT responde sin esperar a los tests, que quedan pendientes hasta que terminan`() {
+        recordRuns(ana, beto)
+        val languageServiceAnswers = CountDownLatch(1)
+        Mockito.`when`(languageClient.run(updated, "printscript", "1.1", listOf("Ana"))).thenAnswer {
+            languageServiceAnswers.await(5, TimeUnit.SECONDS)
+            RunOutcome(listOf("Hola Ana"), null)
+        }
+
+        update().andExpect { status { isOk() } }
+
+        assertEquals(TestStatus.PENDING, statusOf(ana))
+        assertEquals(TestStatus.PENDING, statusOf(beto))
+        languageServiceAnswers.countDown()
+        eventually(ana to TestStatus.PASSED, beto to TestStatus.FAILED)
     }
 
     @Test
     fun `el resultado se ve al listar los tests`() {
         update()
+        eventually(ana to TestStatus.PASSED, beto to TestStatus.FAILED)
 
         mockMvc.get("/snippets/${snippet.id}/tests") { with(asUser("auth0|ana")) }.andExpect {
             jsonPath("$[?(@.name == 'Saluda a Ana')].status") { value("PASSED") }
@@ -116,6 +151,7 @@ class AutomaticTestsTest(
             jsonPath("$.content") { value(updated) }
         }
         assertEquals(updated, contents.load(snippet.id!!))
+        eventually(beto to TestStatus.FAILED)
     }
 
     @Test
@@ -126,23 +162,24 @@ class AutomaticTestsTest(
 
         update()
 
-        assertEquals(TestStatus.FAILED, statusOf(ana))
+        eventually(ana to TestStatus.FAILED)
     }
 
     @Test
     fun `si un test no se puede correr queda pendiente y los demas se corren igual`() {
+        recordRuns(ana)
         Mockito
             .`when`(languageClient.run(updated, "printscript", "1.1", listOf("Ana")))
             .thenThrow(ResourceAccessException("language-service no responde"))
 
         update().andExpect { status { isOk() } }
 
-        assertEquals(TestStatus.PENDING, statusOf(ana))
-        assertEquals(TestStatus.FAILED, statusOf(beto))
+        eventually(ana to TestStatus.PENDING, beto to TestStatus.FAILED)
     }
 
     @Test
-    fun `un update invalido no corre los tests`() {
+    fun `un update invalido no corre los tests ni les cambia el resultado`() {
+        recordRuns(ana)
         Mockito
             .`when`(languageClient.validate("println(", "printscript", "1.1"))
             .thenReturn(listOf(CodeError("Falta un paréntesis", 1, 9)))
@@ -150,7 +187,7 @@ class AutomaticTestsTest(
         update(content = "println(").andExpect { status { isUnprocessableContent() } }
 
         verify(languageClient, never()).run(anyString(), anyString(), anyString(), anyList())
-        assertEquals(TestStatus.PENDING, statusOf(ana))
+        assertEquals(TestStatus.PASSED, statusOf(ana))
     }
 
     @Test

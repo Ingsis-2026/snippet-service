@@ -10,6 +10,7 @@ import com.ingsis.snippet.snippets.Snippet
 import com.ingsis.snippet.snippets.SnippetRepository
 import com.ingsis.snippet.snippets.ValidityStatus
 import com.ingsis.snippet.storage.ContentStore
+import org.hamcrest.Matchers.contains
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -243,5 +244,57 @@ class AutomaticLintingTest(
         assertFailsWith<ResourceAccessException> { linter.lint(camelSnippet.id!!) }
 
         assertEquals(ValidityStatus.PENDING, statusOf(camelSnippet))
+    }
+
+    @Test
+    fun `un snippet pendiente que el worker saltea queda ERROR`() {
+        changeLintingRules()
+
+        linter.giveUp(camelSnippet.id!!)
+
+        assertEquals(ValidityStatus.ERROR, statusOf(camelSnippet))
+    }
+
+    @Test
+    fun `saltear un mensaje viejo no pisa el resultado de un linteo que ya termino`() {
+        changeLintingRules()
+        queue.processAll()
+
+        linter.giveUp(camelSnippet.id!!)
+
+        assertEquals(ValidityStatus.NOT_COMPLIANT, statusOf(camelSnippet))
+    }
+
+    @Test
+    fun `un snippet con ERROR se lintea de nuevo cuando cambian las reglas`() {
+        changeLintingRules()
+        linter.giveUp(snakeSnippet.id!!)
+
+        changeLintingRules("""[{"name": "identifier_format", "isActive": true, "value": "camel case"}]""")
+
+        assertEquals(ValidityStatus.PENDING, statusOf(snakeSnippet))
+        assertTrue(snakeSnippet.id in queue.queued())
+    }
+
+    @Test
+    fun `los que no se pudieron evaluar se filtran y se ordenan en la lista como ERROR`() {
+        Mockito
+            .`when`(permissionClient.snippetsOf("auth0|ana", null))
+            .thenReturn(listOf(camelSnippet.id!!, snakeSnippet.id!!))
+        changeLintingRules()
+        linter.giveUp(camelSnippet.id!!)
+        linter.lint(snakeSnippet.id!!)
+
+        mockMvc
+            .get("/snippets?status=ERROR") { with(asUser("auth0|ana")) }
+            .andExpect {
+                status { isOk() }
+                jsonPath("$.content.length()") { value(1) }
+                jsonPath("$.content[0].name") { value("Camel") }
+                jsonPath("$.content[0].status") { value("ERROR") }
+            }
+        mockMvc
+            .get("/snippets?sort=status,asc") { with(asUser("auth0|ana")) }
+            .andExpect { jsonPath("$.content[*].status") { value(contains("COMPLIANT", "ERROR")) } }
     }
 }
