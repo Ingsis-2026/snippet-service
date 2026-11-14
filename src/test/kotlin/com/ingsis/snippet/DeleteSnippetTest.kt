@@ -27,6 +27,7 @@ import org.springframework.test.web.servlet.delete
 import org.springframework.web.client.HttpServerErrorException
 import java.util.UUID
 import kotlin.test.assertEquals
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /** Borrar un snippet desde la UI: se van sus tests, sus permisos y su código. */
@@ -80,7 +81,9 @@ class DeleteSnippetTest(
         assertEquals(listOf("Otro"), tests.findAll().map { it.name })
         verify(permissionClient).revokeAll(snippet.id!!)
         assertThrows<StorageException> { contents.load(snippet.id!!) }
+        assertNull(contents.loadOriginal(snippet.id!!))
         assertEquals("println(1);", contents.load(other.id!!))
+        assertEquals("println(1);", contents.loadOriginal(other.id!!))
     }
 
     @Test

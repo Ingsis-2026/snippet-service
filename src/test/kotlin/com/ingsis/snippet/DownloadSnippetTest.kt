@@ -3,6 +3,7 @@ package com.ingsis.snippet
 import com.ingsis.snippet.clients.LanguageClient
 import com.ingsis.snippet.clients.PermissionClient
 import com.ingsis.snippet.clients.Role
+import com.ingsis.snippet.formatting.SnippetFormatter
 import com.ingsis.snippet.rules.RuleChange
 import com.ingsis.snippet.rules.RuleService
 import com.ingsis.snippet.rules.RuleType
@@ -19,11 +20,14 @@ import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc
 import org.springframework.http.HttpHeaders
+import org.springframework.http.MediaType
 import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.context.bean.override.mockito.MockitoBean
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.get
+import org.springframework.test.web.servlet.put
 import java.util.UUID
+import kotlin.test.assertEquals
 
 /** US13: descargar un snippet. */
 @SpringBootTest
@@ -35,6 +39,7 @@ class DownloadSnippetTest(
     @Autowired private val rules: UserRuleRepository,
     @Autowired private val ruleService: RuleService,
     @Autowired private val contents: ContentStore,
+    @Autowired private val formatter: SnippetFormatter,
 ) {
     @MockitoBean
     private lateinit var languageClient: LanguageClient
@@ -116,6 +121,54 @@ class DownloadSnippetTest(
 
         download("auth0|ana", id = other.id!!).andExpect {
             header { string(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"Script.txt\"; filename*=UTF-8''Script.txt") }
+        }
+    }
+
+    private val spacing = mapOf("enforce-spacing-around-equals" to true)
+    private val tidy = "let x:number = 5;\nprintln(x);"
+
+    private fun formatAutomatically() {
+        Mockito.`when`(languageClient.format(code, "printscript", "1.0", spacing)).thenReturn(tidy)
+        Mockito.`when`(languageClient.format(tidy, "printscript", "1.0", spacing)).thenReturn(tidy)
+        formatter.format(snippet.id!!)
+    }
+
+    @Test
+    fun `despues del formateo automatico el original sigue siendo el que escribio el usuario`() {
+        formatAutomatically()
+        assertEquals(tidy, contents.load(snippet.id!!))
+
+        download("auth0|beto", formatted = false).andExpect { content { string(code) } }
+        download("auth0|beto", formatted = true).andExpect { content { string(tidy) } }
+    }
+
+    @Test
+    fun `actualizar el snippet despues del formateo automatico renueva el original`() {
+        formatAutomatically()
+        val edited = "let y:number=6;"
+
+        mockMvc
+            .put("/snippets/${snippet.id}") {
+                with(asUser("auth0|ana"))
+                contentType = MediaType.APPLICATION_JSON
+                content =
+                    """{"name": "Saludo", "description": "Imprime un número", "language": "printscript", "version": "1.0",
+                       "content": ${quote(edited)}}"""
+            }.andExpect { status { isOk() } }
+
+        download("auth0|ana").andExpect { content { string(edited) } }
+        assertEquals(edited, contents.load(snippet.id!!))
+    }
+
+    @Test
+    fun `un snippet de antes de que se guardara el original se descarga con su codigo actual`() {
+        val legacy = snippets.save(Snippet("Viejo", "Sin original", "printscript", "1.0", "auth0|ana"))
+        contents.save(legacy.id!!, "println(1);")
+        Mockito.`when`(permissionClient.roleOf(legacy.id!!, "auth0|ana")).thenReturn(Role.OWNER)
+
+        download("auth0|ana", id = legacy.id!!).andExpect {
+            status { isOk() }
+            content { string("println(1);") }
         }
     }
 }
