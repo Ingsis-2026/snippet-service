@@ -1,5 +1,7 @@
 package com.ingsis.snippet.clients
 
+import com.ingsis.snippet.auth.ServiceToken
+import com.ingsis.snippet.auth.authenticatedWith
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.http.MediaType
 import org.springframework.http.ProblemDetail
@@ -59,8 +61,9 @@ data class RunOutcome(
 class LanguageClient(
     builder: RestClient.Builder,
     @Value("\${services.language-url}") baseUrl: String,
+    serviceToken: ServiceToken,
 ) {
-    private val client = builder.baseUrl(baseUrl).build()
+    private val client = builder.baseUrl(baseUrl).authenticatedWith(serviceToken).build()
 
     /** Los errores del código; vacío si es válido. */
     fun validate(

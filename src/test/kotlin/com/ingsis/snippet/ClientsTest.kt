@@ -1,5 +1,6 @@
 package com.ingsis.snippet
 
+import com.ingsis.snippet.auth.ServiceToken
 import com.ingsis.snippet.clients.AlreadyHasAccessException
 import com.ingsis.snippet.clients.CodeError
 import com.ingsis.snippet.clients.LanguageClient
@@ -9,11 +10,14 @@ import com.ingsis.snippet.clients.RunOutcome
 import com.ingsis.snippet.clients.UnsupportedLanguageException
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
+import org.springframework.http.HttpHeaders
 import org.springframework.http.HttpMethod
 import org.springframework.http.HttpStatus
 import org.springframework.http.MediaType
 import org.springframework.test.web.client.MockRestServiceServer
 import org.springframework.test.web.client.match.MockRestRequestMatchers.content
+import org.springframework.test.web.client.match.MockRestRequestMatchers.header
+import org.springframework.test.web.client.match.MockRestRequestMatchers.headerDoesNotExist
 import org.springframework.test.web.client.match.MockRestRequestMatchers.method
 import org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo
 import org.springframework.test.web.client.response.MockRestResponseCreators.withStatus
@@ -27,6 +31,37 @@ import kotlin.test.assertEquals
 class ClientsTest {
     private val builder = RestClient.builder()
     private val server = MockRestServiceServer.bindTo(builder).build()
+    private val noToken = ServiceToken { null }
+
+    @Test
+    fun `los clientes mandan el token del servicio`() {
+        val token = ServiceToken { "token-del-servicio" }
+        server
+            .expect(requestTo("http://language/version"))
+            .andExpect(header(HttpHeaders.AUTHORIZATION, "Bearer token-del-servicio"))
+            .andRespond(withSuccess("""{"printscript": "1.1.0"}""", MediaType.APPLICATION_JSON))
+        server
+            .expect(requestTo("http://permission/permissions"))
+            .andExpect(header(HttpHeaders.AUTHORIZATION, "Bearer token-del-servicio"))
+            .andRespond(withStatus(HttpStatus.CREATED))
+
+        LanguageClient(builder, "http://language", token).parserVersion()
+        PermissionClient(builder, "http://permission", token).grantOwner(UUID.randomUUID(), "auth0|ana")
+
+        server.verify()
+    }
+
+    @Test
+    fun `sin token del servicio no se manda Authorization`() {
+        server
+            .expect(requestTo("http://language/version"))
+            .andExpect(headerDoesNotExist(HttpHeaders.AUTHORIZATION))
+            .andRespond(withSuccess("""{"printscript": "1.1.0"}""", MediaType.APPLICATION_JSON))
+
+        LanguageClient(builder, "http://language", noToken).parserVersion()
+
+        server.verify()
+    }
 
     @Test
     fun `language-service devuelve los errores del codigo`() {
@@ -41,7 +76,7 @@ class ClientsTest {
                 ),
             )
 
-        val errors = LanguageClient(builder, "http://language").validate("x", "printscript", "1.0")
+        val errors = LanguageClient(builder, "http://language", noToken).validate("x", "printscript", "1.0")
 
         assertEquals(listOf(CodeError("Can't handle this sentence", 1, 1)), errors)
         server.verify()
@@ -59,7 +94,7 @@ class ClientsTest {
 
         val error =
             assertThrows<UnsupportedLanguageException> {
-                LanguageClient(builder, "http://language").validate("x", "cobol", "1.0")
+                LanguageClient(builder, "http://language", noToken).validate("x", "cobol", "1.0")
             }
         assertEquals("Lenguaje no soportado: cobol", error.message)
     }
@@ -73,7 +108,7 @@ class ClientsTest {
             .andExpect(content().json("""{"snippetId": "$snippetId", "userId": "auth0|ana", "role": "OWNER"}"""))
             .andRespond(withStatus(HttpStatus.CREATED))
 
-        PermissionClient(builder, "http://permission").grantOwner(snippetId, "auth0|ana")
+        PermissionClient(builder, "http://permission", noToken).grantOwner(snippetId, "auth0|ana")
 
         server.verify()
     }
@@ -87,7 +122,7 @@ class ClientsTest {
             .andExpect(content().json("""{"snippetId": "$snippetId", "userId": "auth0|beto", "role": "READ"}"""))
             .andRespond(withStatus(HttpStatus.CREATED))
 
-        PermissionClient(builder, "http://permission").grantRead(snippetId, "auth0|beto")
+        PermissionClient(builder, "http://permission", noToken).grantRead(snippetId, "auth0|beto")
 
         server.verify()
     }
@@ -97,7 +132,7 @@ class ClientsTest {
         server.expect(requestTo("http://permission/permissions")).andRespond(withStatus(HttpStatus.CONFLICT))
 
         assertThrows<AlreadyHasAccessException> {
-            PermissionClient(builder, "http://permission").grantRead(UUID.randomUUID(), "auth0|beto")
+            PermissionClient(builder, "http://permission", noToken).grantRead(UUID.randomUUID(), "auth0|beto")
         }
     }
 
@@ -109,7 +144,7 @@ class ClientsTest {
             .andExpect(method(HttpMethod.DELETE))
             .andRespond(withStatus(HttpStatus.NO_CONTENT))
 
-        PermissionClient(builder, "http://permission").revokeAll(snippetId)
+        PermissionClient(builder, "http://permission", noToken).revokeAll(snippetId)
 
         server.verify()
     }
@@ -119,7 +154,7 @@ class ClientsTest {
         server.expect(requestTo("http://permission/permissions")).andRespond(withStatus(HttpStatus.INTERNAL_SERVER_ERROR))
 
         assertThrows<HttpServerErrorException> {
-            PermissionClient(builder, "http://permission").grantOwner(UUID.randomUUID(), "auth0|ana")
+            PermissionClient(builder, "http://permission", noToken).grantOwner(UUID.randomUUID(), "auth0|ana")
         }
     }
 
@@ -136,7 +171,7 @@ class ClientsTest {
                 ),
             )
 
-        assertEquals(Role.OWNER, PermissionClient(builder, "http://permission").roleOf(snippetId, "auth0|ana"))
+        assertEquals(Role.OWNER, PermissionClient(builder, "http://permission", noToken).roleOf(snippetId, "auth0|ana"))
         server.verify()
     }
 
@@ -147,7 +182,7 @@ class ClientsTest {
             .expect(requestTo("http://permission/permissions?snippetId=$snippetId&userId=auth0%7Cbeto"))
             .andRespond(withStatus(HttpStatus.NOT_FOUND))
 
-        assertEquals(null, PermissionClient(builder, "http://permission").roleOf(snippetId, "auth0|beto"))
+        assertEquals(null, PermissionClient(builder, "http://permission", noToken).roleOf(snippetId, "auth0|beto"))
     }
 
     @Test
@@ -165,7 +200,7 @@ class ClientsTest {
                 ),
             )
 
-        assertEquals(listOf(own, shared), PermissionClient(builder, "http://permission").snippetsOf("auth0|ana", null))
+        assertEquals(listOf(own, shared), PermissionClient(builder, "http://permission", noToken).snippetsOf("auth0|ana", null))
         server.verify()
     }
 
@@ -175,7 +210,7 @@ class ClientsTest {
             .expect(requestTo("http://permission/permissions/snippets?userId=auth0%7Cana&role=READ"))
             .andRespond(withSuccess("[]", MediaType.APPLICATION_JSON))
 
-        assertEquals(emptyList(), PermissionClient(builder, "http://permission").snippetsOf("auth0|ana", Role.READ))
+        assertEquals(emptyList(), PermissionClient(builder, "http://permission", noToken).snippetsOf("auth0|ana", Role.READ))
         server.verify()
     }
 
@@ -196,7 +231,7 @@ class ClientsTest {
             )
 
         val errors =
-            LanguageClient(builder, "http://language").lint("x", "printscript", "1.0", mapOf("identifier_format" to "camel case"))
+            LanguageClient(builder, "http://language", noToken).lint("x", "printscript", "1.0", mapOf("identifier_format" to "camel case"))
 
         assertEquals(listOf(CodeError("The following identifier must be in camel case", 1, 5)), errors)
         server.verify()
@@ -211,7 +246,15 @@ class ClientsTest {
                 content().json("""{"code": "x=1", "language": "printscript", "version": "1.0", "rules": {"indent-inside-if": 2}}"""),
             ).andRespond(withSuccess("""{"content": "x = 1"}""", MediaType.APPLICATION_JSON))
 
-        val formatted = LanguageClient(builder, "http://language").format("x=1", "printscript", "1.0", mapOf("indent-inside-if" to 2))
+        val formatted =
+            LanguageClient(builder, "http://language", noToken).format(
+                "x=1",
+                "printscript",
+                "1.0",
+                mapOf(
+                    "indent-inside-if" to 2,
+                ),
+            )
 
         assertEquals("x = 1", formatted)
         server.verify()
@@ -224,7 +267,7 @@ class ClientsTest {
             .andExpect(method(HttpMethod.GET))
             .andRespond(withSuccess("""{"printscript": "1.2.0"}""", MediaType.APPLICATION_JSON))
 
-        assertEquals("1.2.0", LanguageClient(builder, "http://language").parserVersion())
+        assertEquals("1.2.0", LanguageClient(builder, "http://language", noToken).parserVersion())
         server.verify()
     }
 
@@ -241,7 +284,7 @@ class ClientsTest {
                 ),
             )
 
-        val outcome = LanguageClient(builder, "http://language").run("x", "printscript", "1.1", listOf("Ana"))
+        val outcome = LanguageClient(builder, "http://language", noToken).run("x", "printscript", "1.1", listOf("Ana"))
 
         assertEquals(RunOutcome(listOf("Hola Ana"), CodeError("No hay más inputs", 2, 5)), outcome)
         server.verify()
