@@ -2,6 +2,7 @@ package com.ingsis.snippet.parser
 
 import com.ingsis.snippet.clients.LanguageClient
 import com.ingsis.snippet.linting.LintQueue
+import com.ingsis.snippet.observability.withLogContext
 import com.ingsis.snippet.snippets.SnippetRepository
 import jakarta.persistence.Column
 import jakarta.persistence.Entity
@@ -84,13 +85,17 @@ class ParserVersionWatcher(
         val previous = versions.findById(ParserVersion.ID).getOrNull()?.version
         if (previous == current) return
 
-        log.info("Versión nueva del parser: ${previous ?: "ninguna"} -> $current. Se vuelven a validar todos los snippets")
+        withLogContext("previousVersion" to previous, "currentVersion" to current) {
+            log.info("Versión nueva del parser: se vuelven a validar todos los snippets")
+        }
         try {
             snippets.markAllPending()
             lintQueue.enqueue(snippets.findAllIds())
             record(previous, current)
         } catch (e: DataAccessException) {
-            log.warn("No se pudieron encolar los snippets para validarlos con el parser $current; se reintenta en la próxima vuelta", e)
+            withLogContext("currentVersion" to current) {
+                log.warn("No se pudieron encolar los snippets para validarlos con el parser nuevo; se reintenta en la próxima vuelta", e)
+            }
         }
     }
 

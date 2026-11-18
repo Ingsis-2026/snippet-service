@@ -5,7 +5,7 @@ import org.springframework.context.annotation.Primary
 import org.springframework.stereotype.Component
 import java.util.concurrent.ConcurrentLinkedQueue
 
-/** Reemplaza a New Relic en los tests: anota los eventos y los atributos que el servicio le reporta. */
+/** Reemplaza a New Relic en los tests: anota los eventos, los atributos y los usuarios que el servicio le reporta. */
 @Primary
 @Component
 class RecordingTelemetry : Telemetry {
@@ -16,6 +16,7 @@ class RecordingTelemetry : Telemetry {
 
     private val events = ConcurrentLinkedQueue<Event>()
     private val attributes = ConcurrentLinkedQueue<Pair<String, Number>>()
+    private val users = ConcurrentLinkedQueue<String>()
 
     override fun recordEvent(
         type: String,
@@ -31,12 +32,19 @@ class RecordingTelemetry : Telemetry {
         attributes += key to value
     }
 
+    override fun setUser(userId: String) {
+        users += userId
+    }
+
     fun events(type: String): List<Map<String, Any>> = events.filter { it.type == type }.map { it.attributes }
 
     fun attributes(key: String): List<Number> = attributes.filter { it.first == key }.map { it.second }
 
+    fun users(): List<String> = users.toList()
+
     fun clear() {
         events.clear()
         attributes.clear()
+        users.clear()
     }
 }

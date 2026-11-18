@@ -4,6 +4,8 @@ import com.ingsis.snippet.clients.CodeError
 import com.ingsis.snippet.clients.LanguageClient
 import com.ingsis.snippet.clients.PermissionClient
 import com.ingsis.snippet.observability.Telemetry
+import com.ingsis.snippet.observability.USER
+import com.ingsis.snippet.observability.withLogContext
 import com.ingsis.snippet.rules.RuleService
 import com.ingsis.snippet.rules.RuleType
 import com.ingsis.snippet.storage.ContentStore
@@ -139,7 +141,9 @@ class SnippetService(
     private fun checkNoneHidden(userId: String) {
         val owned = repository.countByOwnerId(userId)
         if (owned == 0L) return
-        log.error("$userId tiene $owned snippets en la base, pero permission-service no le devuelve ninguno")
+        withLogContext(USER to userId, "ownedSnippets" to owned) {
+            log.error("El usuario tiene snippets en la base, pero permission-service no le devuelve ninguno")
+        }
         telemetry.recordEvent(HIDDEN_EVENT, mapOf("userId" to userId, "owned" to owned))
     }
 
@@ -287,7 +291,7 @@ class SnippetService(
         try {
             contents.delete(event.snippetId)
         } catch (e: StorageException) {
-            log.warn("Se borró el snippet ${event.snippetId} pero no su código", e)
+            withLogContext("snippetId" to event.snippetId) { log.warn("Se borró el snippet pero no su código", e) }
         }
     }
 

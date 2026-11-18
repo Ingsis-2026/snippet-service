@@ -22,6 +22,9 @@ interface Telemetry {
         key: String,
         value: Number,
     )
+
+    /** Quién hizo el pedido que se está atendiendo: queda en su transacción como `enduser.id`. */
+    fun setUser(userId: String)
 }
 
 /** Sin el agente de New Relic (en local, en los tests), las llamadas a su API no hacen nada. */
@@ -36,4 +39,6 @@ class NewRelicTelemetry : Telemetry {
         key: String,
         value: Number,
     ) = NewRelic.addCustomParameter(key, value)
+
+    override fun setUser(userId: String) = NewRelic.setUserId(userId)
 }

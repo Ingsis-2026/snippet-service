@@ -2,6 +2,9 @@ package com.ingsis.snippet.execution
 
 import com.ingsis.snippet.auth.ServiceToken
 import com.ingsis.snippet.clients.CodeError
+import com.ingsis.snippet.observability.REQUEST_ID
+import com.ingsis.snippet.observability.REQUEST_ID_HEADER
+import org.slf4j.MDC
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.stereotype.Component
 import org.springframework.web.socket.CloseStatus
@@ -95,7 +98,12 @@ class WebSocketLanguageExecutor(
         val relay = Relay(listener)
         val session =
             try {
-                val headers = WebSocketHttpHeaders().apply { serviceToken.get()?.let { setBearerAuth(it) } }
+                val headers =
+                    WebSocketHttpHeaders().apply {
+                        serviceToken.get()?.let { setBearerAuth(it) }
+                        // Así los logs de la ejecución en language-service llevan el id del pedido que la abrió.
+                        MDC.get(REQUEST_ID)?.let { set(REQUEST_ID_HEADER, it) }
+                    }
                 client.execute(relay, headers, url).get(CONNECT_TIMEOUT_SECONDS, TimeUnit.SECONDS)
             } catch (e: Exception) {
                 throw LanguageUnavailableException(e)

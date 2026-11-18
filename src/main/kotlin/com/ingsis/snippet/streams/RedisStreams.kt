@@ -4,7 +4,9 @@ import com.ingsis.snippet.formatting.FormatQueue
 import com.ingsis.snippet.formatting.SnippetFormatter
 import com.ingsis.snippet.linting.LintQueue
 import com.ingsis.snippet.linting.SnippetLinter
+import com.ingsis.snippet.observability.REQUEST_ID
 import com.ingsis.snippet.observability.Telemetry
+import com.ingsis.snippet.observability.withLogContext
 import com.newrelic.api.agent.ConcurrentHashMapHeaders
 import com.newrelic.api.agent.HeaderType
 import com.newrelic.api.agent.NewRelic
@@ -12,6 +14,7 @@ import com.newrelic.api.agent.Trace
 import com.newrelic.api.agent.TransportType
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
+import org.slf4j.MDC
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
 import org.springframework.boot.context.properties.ConfigurationProperties
 import org.springframework.boot.context.properties.EnableConfigurationProperties
@@ -118,7 +121,8 @@ class RedisStreamsConfig {
  * Cada snippet es un mensaje de [stream], con su id en el campo [SNIPPET_ID]. Si corre con el agente de New
  * Relic, el mensaje lleva además los headers del trace del pedido que lo encoló (`traceparent`, `newrelic`),
  * así el linteo o el formateo en segundo plano aparece en el mismo trace que la creación del snippet.
- * Sin el agente no se agrega nada.
+ * Sin el agente no se agrega nada. Si se encoló atendiendo un pedido, lleva también su id en [REQUEST_ID], que
+ * el worker vuelve a poner en el MDC: los logs del linteo o del formateo tienen el mismo `requestId` que el pedido.
  */
 class RedisSnippetQueue(
     private val redis: StringRedisTemplate,
@@ -128,7 +132,11 @@ class RedisSnippetQueue(
     fun enqueue(snippetIds: Collection<UUID>) {
         val trace = traceHeaders()
         for (id in snippetIds) {
-            redis.opsForStream<String, String>().add(stream, trace + (SNIPPET_ID to id.toString()), properties.trimming())
+            redis.opsForStream<String, String>().add(
+                stream,
+                trace + requestIdField() + (SNIPPET_ID to id.toString()),
+                properties.trimming(),
+            )
         }
     }
 }
@@ -189,7 +197,7 @@ class RedisSnippetWorker(
             if (retryStuck()) readNew()
         } catch (e: DataAccessException) {
             // Sin el stack trace: con Redis caído esto se repite en cada vuelta.
-            log.warn("No se pudo leer el stream $stream de Redis: ${e.message}")
+            withLogContext("stream" to stream) { log.warn("No se pudo leer el stream de Redis: ${e.message}") }
         }
     }
 
@@ -236,7 +244,8 @@ class RedisSnippetWorker(
      * Devuelve si se puede seguir con el próximo mensaje: no si falló una dependencia.
      *
      * Cada mensaje es una transacción de New Relic (`RedisStream/<stream>`) que continúa el trace de quien lo
-     * encoló. Sin el agente, la anotación y las llamadas a NewRelic no hacen nada.
+     * encoló. Sin el agente, la anotación y las llamadas a NewRelic no hacen nada. Mientras se procesa, el MDC
+     * tiene el `requestId` del pedido que lo encoló, el snippet y el mensaje.
      */
     @Trace(dispatcher = true)
     private fun handle(delivery: Delivery): Boolean {
@@ -245,14 +254,23 @@ class RedisSnippetWorker(
             .getAgent()
             .transaction
             .acceptDistributedTraceHeaders(TransportType.Queue, traceHeadersOf(delivery.record.value))
+        return withLogContext(
+            REQUEST_ID to delivery.record.value[REQUEST_ID],
+            SNIPPET_ID to delivery.record.value[SNIPPET_ID],
+            "stream" to stream,
+            "messageId" to delivery.record.id,
+        ) { attempt(delivery) }
+    }
+
+    private fun attempt(delivery: Delivery): Boolean {
         val id = delivery.snippetId
         if (id == null) {
-            log.error("Se descarta el mensaje ${delivery.record.id} de $stream: no trae un $SNIPPET_ID válido")
+            log.error("Se descarta un mensaje que no trae un $SNIPPET_ID válido")
             acknowledge(delivery.record.id)
             return true
         }
         if (delivery.failedAttempts >= properties.maxAttempts) {
-            log.error("Se saltea el snippet $id de $stream: ya se intentó ${delivery.failedAttempts} veces sin que terminara bien")
+            log.error("Se saltea el snippet: ya se intentó ${delivery.failedAttempts} veces sin que terminara bien")
             skip(delivery, id)
             return true
         }
@@ -281,10 +299,10 @@ class RedisSnippetWorker(
     ) {
         backoff.reset()
         if (delivery.failedAttempts + 1 >= properties.maxAttempts) {
-            log.error("Se saltea el snippet $id de $stream: falló las ${properties.maxAttempts} veces que se intentó", e)
+            log.error("Se saltea el snippet: falló las ${properties.maxAttempts} veces que se intentó", e)
             skip(delivery, id)
         } else {
-            log.warn("No se pudo procesar el snippet $id de $stream; se reintenta en ${properties.retryAfter}", e)
+            log.warn("No se pudo procesar el snippet; se reintenta en ${properties.retryAfter}", e)
         }
     }
 
@@ -296,10 +314,10 @@ class RedisSnippetWorker(
     ) {
         val pause = backoff.pause()
         if (delivery.deferrals >= properties.maxDeferrals) {
-            log.error("Se saltea el snippet $id de $stream: ya se postergó ${delivery.deferrals} veces porque falló una dependencia", e)
+            log.error("Se saltea el snippet: ya se postergó ${delivery.deferrals} veces porque falló una dependencia", e)
             skip(delivery, id)
         } else {
-            log.warn("Falló una dependencia procesando el snippet $id de $stream (${e.message}); se posterga y se deja de leer por $pause")
+            log.warn("Falló una dependencia procesando el snippet (${e.message}); se posterga y se deja de leer por $pause")
             requeue(delivery, delivery.deferrals + 1)
         }
     }
@@ -372,6 +390,9 @@ private fun traceHeaders(): Map<String, String> {
     return headers.headerNames.associateWith { headers.getHeader(it) }
 }
 
-/** Los headers de trace que trae un mensaje: todos sus campos menos los que son del worker. */
+/** Los headers de trace que trae un mensaje: todos sus campos menos los que son del worker y el id del pedido. */
 private fun traceHeadersOf(fields: Map<String, String>) =
-    ConcurrentHashMapHeaders.buildFromFlatMap(HeaderType.MESSAGE, fields - setOf(SNIPPET_ID, ATTEMPTS, DEFERRALS))
+    ConcurrentHashMapHeaders.buildFromFlatMap(HeaderType.MESSAGE, fields - setOf(SNIPPET_ID, ATTEMPTS, DEFERRALS, REQUEST_ID))
+
+/** El id del pedido que se está atendiendo, para guardarlo en un mensaje; vacío si no se está atendiendo ninguno. */
+private fun requestIdField(): Map<String, String> = MDC.get(REQUEST_ID)?.let { mapOf(REQUEST_ID to it) }.orEmpty()

@@ -16,6 +16,8 @@ WORKDIR /app
 COPY --from=build /app/build/libs/app.jar app.jar
 # El agente de New Relic con su newrelic.yml. No hace nada salvo que NEW_RELIC_AGENT_ENABLED=true (en las VMs).
 COPY --from=build /app/build/newrelic newrelic
+# Logs en JSON (ECS), uno por línea: ver logging.structured en application.yml.
+ENV LOG_FORMAT=ecs
 USER spring
 EXPOSE 8080
 ENTRYPOINT ["java", "-javaagent:/app/newrelic/newrelic.jar", "-jar", "app.jar"]

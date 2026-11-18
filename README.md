@@ -56,6 +56,18 @@ Los dos son idempotentes: se usa el estado actual, no el del momento en que se e
 
 La primera vez que corre no hay versión guardada, así que se validan todos los snippets que ya estaban.
 
+## Logs
+
+En Docker (`LOG_FORMAT=ecs`) cada log es una línea de JSON en formato ECS, con el servicio (`service.name`) y el contexto como campos aparte, no metido en el texto del mensaje:
+
+- `requestId`: el id del pedido. Lo pone nginx en el header `X-Request-Id`; si no viene (llamando directo al servicio), se genera uno. Vuelve en la respuesta y se le pasa a permission-service y language-service en cada llamado, así sus logs del mismo pedido tienen el mismo id. También viaja en los mensajes de los streams: los logs del linteo o el formateo en segundo plano llevan el id del pedido que lo encoló.
+- `user`: el `sub` del access token, una vez que Spring Security lo validó. En New Relic, la transacción queda con `enduser.id`.
+- Lo propio de cada log: `snippetId`, `stream`, `testId`...
+
+Un error inesperado, o un servicio interno que falló (el 502), va en ERROR con el stack trace mientras el MDC todavía tiene el `requestId`.
+
+El contexto va en el MDC (`withLogContext`) y no en key-values de SLF4J porque el agente de New Relic reenvía el MDC (como `context.requestId`, etc.) pero no los key-values. Nunca se loguean tokens, secrets ni el código de los snippets.
+
 ## Tests al actualizar un snippet (US16)
 
 En la misma transacción que el update, todos los tests del snippet vuelven a `PENDING`: el resultado que tenían era del código anterior. Una vez guardado, se corren en otro hilo (`@Async`, con el executor de Spring Boot) y el PUT responde sin esperarlos. Cada test termina `PASSED` o `FAILED`; uno que no se pudo correr queda `PENDING` y no frena a los demás. La UI consulta los tests hasta que ninguno esté `PENDING`.
@@ -83,6 +95,7 @@ Necesita su Postgres, asset-service (con su Azurite) y Redis. Lo más simple es 
 | `AUTH0_M2M_CLIENT_ID` / `AUTH0_M2M_CLIENT_SECRET` | Vacíos. La aplicación machine-to-machine de Auth0 del servicio: con `read:users` en la Management API busca con quién compartir (US7), y autorizada en la API interna pide el token con el que llama a permission-service y language-service. Sin ellos, `GET /users` responde 503 y a esos dos servicios los llama sin token (tienen que correr con `AUTH_ENABLED=false`). **El secret nunca se commitea.** |
 | `AUTH0_INTERNAL_AUDIENCE` | `https://snippet-searcher/internal`. El identifier de la API interna en Auth0, la audience que validan permission-service y language-service. |
 | `CORS_ALLOWED_ORIGINS` | `http://localhost:5173`. Origins de otros dominios que pueden llamar a la API desde el navegador, separados por comas. La UI desplegada no lo necesita: llama a `/api` en su mismo dominio. |
+| `LOG_FORMAT` | Vacío: logs en texto, para leerlos en la consola del IDE o en los tests, con el contexto entre corchetes (`[requestId=…, user=…]`). La imagen de Docker trae `ecs`: un JSON por línea (ver [Logs](#logs)). |
 | `SCHEDULING_POOL_SIZE` | `4`. Cuántos hilos tienen las tareas programadas (ver [Tareas programadas](#tareas-programadas)). |
 | `LINT_SWEEP_INTERVAL` / `LINT_SWEEP_STUCK_AFTER` | `5m` / `10m`. Cada cuánto se buscan snippets `PENDING` sin un mensaje que los vaya a lintear, y cuánto tienen que llevar así para volver a encolarlos. |
 
