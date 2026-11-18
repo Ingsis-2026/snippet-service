@@ -23,7 +23,10 @@ fun interface FormatQueue {
     fun enqueue(snippetIds: Collection<UUID>)
 }
 
-/** Formatea un snippet con las reglas de su owner y guarda el código formateado (US12). */
+/**
+ * Formatea un snippet con las reglas de su owner y guarda el código formateado (US12). Reemplaza
+ * solo el código actual: el original, como lo escribió el usuario, se sigue descargando tal cual (US13).
+ */
 @Service
 class SnippetFormatter(
     private val repository: SnippetRepository,

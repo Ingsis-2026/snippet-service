@@ -18,6 +18,7 @@ import java.util.concurrent.ConcurrentHashMap
 @Component
 class InMemoryContentStore : ContentStore {
     private val contents = ConcurrentHashMap<UUID, String>()
+    private val originals = ConcurrentHashMap<UUID, String>()
 
     override fun save(
         id: UUID,
@@ -30,14 +31,28 @@ class InMemoryContentStore : ContentStore {
     override fun load(id: UUID): String =
         contents[id] ?: throw StorageException("No se pudo leer el código del snippet $id", NoSuchElementException())
 
+    override fun saveOriginal(
+        id: UUID,
+        content: String,
+    ) {
+        originals[id] = content
+    }
+
+    override fun loadOriginal(id: UUID): String? = originals[id]
+
     override fun delete(id: UUID) {
         contents.remove(id)
+        originals.remove(id)
     }
 }
 
-/** Guarda un snippet como lo hace SnippetService: la metadata en la base y el código en el store. */
+/** Guarda un snippet como lo hace SnippetService: la metadata en la base y el código, actual y original, en el store. */
 fun SnippetRepository.save(
     snippet: Snippet,
     content: String,
     contents: ContentStore,
-): Snippet = save(snippet).also { contents.save(it.id!!, content) }
+): Snippet =
+    save(snippet).also {
+        contents.saveOriginal(it.id!!, content)
+        contents.save(it.id!!, content)
+    }

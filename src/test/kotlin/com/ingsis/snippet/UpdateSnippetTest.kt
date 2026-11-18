@@ -101,6 +101,7 @@ class UpdateSnippetTest(
         val saved = stored()
         assertEquals("Saludo v2", saved.name)
         assertEquals(updated, contents.load(saved.id!!))
+        assertEquals(updated, contents.loadOriginal(saved.id!!))
         assertEquals("1.1", saved.version)
     }
 
@@ -111,6 +112,7 @@ class UpdateSnippetTest(
             jsonPath("$.content") { value(updated) }
         }
         assertEquals(updated, contents.load(snippet.id!!))
+        assertEquals(updated, contents.loadOriginal(snippet.id!!))
     }
 
     @Test
@@ -135,6 +137,7 @@ class UpdateSnippetTest(
         val saved = stored()
         assertEquals("Saludo", saved.name)
         assertEquals(original, contents.load(saved.id!!))
+        assertEquals(original, contents.loadOriginal(saved.id!!))
         assertEquals(ValidityStatus.COMPLIANT, saved.status)
     }
 

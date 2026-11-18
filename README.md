@@ -5,7 +5,7 @@ Parte de **Snippet Searcher** (Ingeniería de Sistemas 2026). Es el servicio al 
 ## De qué es dueño
 
 - **Metadata de cada snippet** (nombre, descripción, lenguaje, versión, owner) en su propio Postgres.
-- **Código de cada snippet**, en el [asset-service](https://github.com/austral-ingsis/asset-service) de la cátedra: un asset por snippet en el container `snippets`, que se llama como su id. asset-service lo guarda en Azure Blob Storage; en local y en las VMs es Azurite, el emulador de Azure Storage. snippet-service no habla con Azurite.
+- **Código de cada snippet**, en el [asset-service](https://github.com/austral-ingsis/asset-service) de la cátedra, en dos assets por snippet en el container `snippets`: el código actual, que se llama como su id, y el original, como lo escribió el usuario al crearlo o actualizarlo, que se llama `<id>-original` (ver [Formato](#linteo-y-formateo-automáticos)). asset-service los guarda en Azure Blob Storage; en local y en las VMs es Azurite, el emulador de Azure Storage. snippet-service no habla con Azurite.
 - **Tests de cada snippet**: inputs y outputs esperados (US8). Correrlos es trabajo de `language-service`.
 - **Reglas de lint y formato elegidas por cada usuario** (US11, US14). Se le pasan a `language-service` en cada llamada.
 - **Estado de validez de cada snippet** (`PENDING` / `COMPLIANT` / `NOT_COMPLIANT` / `INVALID` / `ERROR`), persistido, para poder filtrar y ordenar por él (US5).
@@ -31,7 +31,7 @@ Lo mismo pasa al crear o actualizar un snippet: se encola para lintearlo.
 **Formato.**
 
 1. Una vez guardadas las reglas, se encola cada snippet del usuario en el stream `format-requests` y se responde.
-2. Otro worker, con el mismo consumer group, lo formatea en language-service con el código y las reglas que hay en ese momento. Si el código cambió, el snippet pasa a `PENDING`, se guarda el código formateado y se encola en `lint-requests`, porque el linteo que tenía era del código anterior. Recién ahí confirma el mensaje.
+2. Otro worker, con el mismo consumer group, lo formatea en language-service con el código y las reglas que hay en ese momento. Si el código cambió, el snippet pasa a `PENDING`, se guarda el código formateado como el actual y se encola en `lint-requests`, porque el linteo que tenía era del código anterior. Recién ahí confirma el mensaje. El original no se toca: es el que se descarga sin formatear (US13), y el formateado sale de aplicarle al actual las reglas que hay en ese momento. Un snippet creado antes de que se guardara el original no lo tiene, y sin formatear se descarga el actual.
 3. Si el owner editó el snippet mientras se formateaba, no se pisa su código: queda el que guardó él.
 
 **Por qué dos streams y no uno con el tipo de trabajo.** Formatear es lo más pesado y cada formateo termina encolando un linteo: en un solo stream, una tanda grande de formateos dejaría esperando detrás suyo el linteo de un snippet recién creado. Con uno por tipo, cada worker avanza por su cuenta, el backlog y los pendientes de cada uno se ven por separado (`XLEN`, `XPENDING`), y el mensaje sigue siendo solo el id del snippet. El worker es el mismo código para los dos (`RedisSnippetWorker`); solo cambia qué hace con cada snippet.

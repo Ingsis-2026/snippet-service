@@ -46,8 +46,8 @@ data class SnippetResponse(
 )
 
 /**
- * Con quién se comparte. Elegirlo de un listado que se filtra mientras se escribe (US7) necesita
- * los usuarios de Auth0; hasta entonces llega el id tal cual.
+ * Con quién se comparte (US7): el id de Auth0 del usuario, que la UI elige del listado que se
+ * filtra mientras se escribe (`GET /users`).
  */
 data class ShareRequest(
     @field:NotBlank val userId: String,

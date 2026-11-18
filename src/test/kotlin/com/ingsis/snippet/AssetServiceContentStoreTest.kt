@@ -16,8 +16,12 @@ import org.springframework.web.client.RestClient
 import java.util.UUID
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertNull
 
-/** El código en asset-service: un asset por snippet, que se llama como su id. */
+/**
+ * El código en asset-service: el actual en un asset que se llama como el id del snippet, y el original
+ * en otro que se llama como el id seguido de `-original`.
+ */
 class AssetServiceContentStoreTest {
     private val builder = RestClient.builder()
     private val server = MockRestServiceServer.bindTo(builder).build()
@@ -73,9 +77,13 @@ class AssetServiceContentStoreTest {
     }
 
     @Test
-    fun `borra el asset del snippet`() {
+    fun `borra el asset del snippet y el de su original`() {
         server
             .expect(requestTo("http://asset/v1/asset/snippets/$id"))
+            .andExpect(method(HttpMethod.DELETE))
+            .andRespond(withStatus(HttpStatus.NO_CONTENT))
+        server
+            .expect(requestTo("http://asset/v1/asset/snippets/$id-original"))
             .andExpect(method(HttpMethod.DELETE))
             .andRespond(withStatus(HttpStatus.NO_CONTENT))
 
@@ -87,10 +95,73 @@ class AssetServiceContentStoreTest {
     @Test
     fun `borrar un codigo que ya no estaba tambien esta bien`() {
         server.expect(requestTo("http://asset/v1/asset/snippets/$id")).andRespond(withStatus(HttpStatus.NOT_FOUND))
+        server.expect(requestTo("http://asset/v1/asset/snippets/$id-original")).andRespond(withStatus(HttpStatus.NOT_FOUND))
 
         store.delete(id)
 
         server.verify()
+    }
+
+    @Test
+    fun `si asset-service falla al borrar el original dice de que snippet era`() {
+        server.expect(requestTo("http://asset/v1/asset/snippets/$id")).andRespond(withStatus(HttpStatus.NO_CONTENT))
+        server
+            .expect(requestTo("http://asset/v1/asset/snippets/$id-original"))
+            .andRespond(withStatus(HttpStatus.INTERNAL_SERVER_ERROR))
+
+        val error = assertFailsWith<StorageException> { store.delete(id) }
+        assertEquals("No se pudo borrar el código original del snippet $id", error.message)
+    }
+
+    @Test
+    fun `guarda el original en su propio asset`() {
+        server
+            .expect(requestTo("http://asset/v1/asset/snippets/$id-original"))
+            .andExpect(method(HttpMethod.PUT))
+            .andExpect(content().contentType("text/plain;charset=UTF-8"))
+            .andExpect(content().bytes("let x:number=5;".toByteArray(Charsets.UTF_8)))
+            .andRespond(withStatus(HttpStatus.CREATED))
+
+        store.saveOriginal(id, "let x:number=5;")
+
+        server.verify()
+    }
+
+    @Test
+    fun `lee el original de su propio asset`() {
+        server
+            .expect(requestTo("http://asset/v1/asset/snippets/$id-original"))
+            .andExpect(method(HttpMethod.GET))
+            .andRespond(withSuccess("println(\"señor\");".toByteArray(Charsets.UTF_8), MediaType.APPLICATION_OCTET_STREAM))
+
+        assertEquals("println(\"señor\");", store.loadOriginal(id))
+    }
+
+    @Test
+    fun `un snippet sin original no es un error`() {
+        server.expect(requestTo("http://asset/v1/asset/snippets/$id-original")).andRespond(withStatus(HttpStatus.NOT_FOUND))
+
+        assertNull(store.loadOriginal(id))
+    }
+
+    @Test
+    fun `si asset-service falla al leer el original dice de que snippet era`() {
+        server
+            .expect(requestTo("http://asset/v1/asset/snippets/$id-original"))
+            .andRespond(withStatus(HttpStatus.INTERNAL_SERVER_ERROR))
+
+        val error = assertFailsWith<StorageException> { store.loadOriginal(id) }
+        assertEquals("No se pudo leer el código original del snippet $id", error.message)
+    }
+
+    @Test
+    fun `si asset-service falla al guardar el original dice de que snippet era`() {
+        server
+            .expect(requestTo("http://asset/v1/asset/snippets/$id-original"))
+            .andRespond(withStatus(HttpStatus.INTERNAL_SERVER_ERROR))
+
+        val error = assertFailsWith<StorageException> { store.saveOriginal(id, "println(1);") }
+        assertEquals("No se pudo guardar el código original del snippet $id", error.message)
     }
 
     @Test
