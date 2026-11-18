@@ -29,6 +29,7 @@ import org.springframework.data.redis.connection.stream.StreamReadOptions
 import org.springframework.data.redis.core.StringRedisTemplate
 import org.springframework.scheduling.annotation.EnableScheduling
 import org.springframework.scheduling.annotation.Scheduled
+import java.time.Clock
 import java.time.Duration
 import java.util.UUID
 
@@ -55,8 +56,14 @@ data class StreamProperties(
     val batchSize: Long = 50,
     /** Cuánto tiene que pasar sin confirmarse un mensaje para darlo por fallado y reintentarlo. */
     val retryAfter: Duration = Duration.ofMinutes(1),
-    /** Después de cuántas entregas se saltea un mensaje que sigue fallando. */
+    /** Después de cuántos intentos fallidos por culpa del snippet se lo saltea. */
     val maxAttempts: Long = 3,
+    /** Cuánto deja de leer el worker la primera vez que falla una dependencia. Se duplica con cada falla seguida. */
+    val backoff: Duration = Duration.ofSeconds(10),
+    /** Hasta dónde crece la pausa del worker mientras una dependencia sigue fallando. */
+    val maxBackoff: Duration = Duration.ofMinutes(5),
+    /** Cuántas veces se puede postergar un mismo mensaje porque falló una dependencia antes de saltearlo. */
+    val maxDeferrals: Long = 20,
     /** Tope aproximado de mensajes que guarda cada stream. */
     val maxLength: Long = 100_000,
 )
@@ -77,12 +84,13 @@ class RedisStreamsConfig {
         properties: StreamProperties,
     ): LintQueue = LintQueue(RedisSnippetQueue(redis, properties.lintStream, properties)::enqueue)
 
+    /** Un snippet que no se pudo lintear queda `ERROR`. */
     @Bean
     fun lintWorker(
         redis: StringRedisTemplate,
         linter: SnippetLinter,
         properties: StreamProperties,
-    ) = RedisSnippetWorker(redis, properties.lintStream, properties, linter::lint)
+    ) = RedisSnippetWorker(redis, properties.lintStream, properties, giveUp = linter::giveUp, process = linter::lint)
 
     @Bean
     fun formatQueue(
@@ -90,12 +98,13 @@ class RedisStreamsConfig {
         properties: StreamProperties,
     ): FormatQueue = FormatQueue(RedisSnippetQueue(redis, properties.formatStream, properties)::enqueue)
 
+    /** Un snippet que no se pudo formatear queda con el código que tenía: no hay nada que marcar. */
     @Bean
     fun formatWorker(
         redis: StringRedisTemplate,
         formatter: SnippetFormatter,
         properties: StreamProperties,
-    ) = RedisSnippetWorker(redis, properties.formatStream, properties, formatter::format)
+    ) = RedisSnippetWorker(redis, properties.formatStream, properties, process = formatter::format)
 
     @Bean
     fun streamBacklogReporter(
@@ -117,10 +126,9 @@ class RedisSnippetQueue(
     private val properties: StreamProperties,
 ) {
     fun enqueue(snippetIds: Collection<UUID>) {
-        val options = XAddOptions.maxlen(properties.maxLength).approximateTrimming(true)
         val trace = traceHeaders()
         for (id in snippetIds) {
-            redis.opsForStream<String, String>().add(stream, trace + (SNIPPET_ID to id.toString()), options)
+            redis.opsForStream<String, String>().add(stream, trace + (SNIPPET_ID to id.toString()), properties.trimming())
         }
     }
 }
@@ -132,28 +140,53 @@ class RedisSnippetQueue(
  * Redis. Por eso [process] tiene que ser idempotente.
  *
  * En cada vuelta primero retoma los pendientes que llevan [StreamProperties.retryAfter] sin
- * confirmarse, sean de esta réplica o de otra, y después lee los nuevos. Un mensaje que ya se
- * entregó [StreamProperties.maxAttempts] veces se confirma sin procesar: se saltea el snippet que
- * causa la falla para que no frene al resto.
+ * confirmarse, sean de esta réplica o de otra, y después lee los nuevos.
+ *
+ * **No es lo mismo que falle el snippet que una dependencia.** La historia de usuario pide saltear
+ * el snippet que causa la falla para que no frene al resto, pero si language-service, asset-service,
+ * la base o Redis no responden ([isDependencyFailure]), la falla no es del snippet: saltearlo
+ * perdería el trabajo de todos los que se procesen mientras dura la caída.
+ *
+ * - Si falla el snippet, el mensaje queda pendiente y se reintenta pasado
+ *   [StreamProperties.retryAfter]. Al fallar [StreamProperties.maxAttempts] veces se lo saltea: se
+ *   llama a [giveUp] (el linteo lo marca `ERROR`) y se lo confirma.
+ * - Si falla una dependencia, el mensaje se posterga sin gastarle un intento ([requeue]), lo mismo
+ *   que los que quedaban de la tanda, y el worker deja de leer por un rato ([Backoff]). Dejarlo
+ *   pendiente no alcanza: retomarlo con `XCLAIM` suma una entrega, y en una caída de tres minutos se
+ *   le gastarían todos los intentos.
+ *
+ * Los intentos fallidos se cuentan con las entregas de Redis más los que traiga el mensaje en
+ * [ATTEMPTS], que son los de las copias anteriores que se postergaron. Un mensaje que se entregó
+ * [StreamProperties.maxAttempts] veces y nunca terminó (el servicio se cayó procesándolo cada vez)
+ * también se saltea.
+ *
+ * Un 500 que da un snippet en particular parece una falla de la dependencia, así que se lo
+ * postergaría para siempre. Por eso se saltea también un mensaje que se postergó
+ * [StreamProperties.maxDeferrals] veces: con las pausas cada vez más largas, para eso tiene que
+ * haber sido el que encontró la dependencia caída durante más de una hora.
  */
 class RedisSnippetWorker(
     private val redis: StringRedisTemplate,
     private val stream: String,
     private val properties: StreamProperties,
+    clock: Clock = Clock.systemUTC(),
+    private val giveUp: (UUID) -> Unit = {},
     private val process: (UUID) -> Unit,
 ) {
     /** El grupo se crea con la primera vuelta y no al arrancar: así el servicio levanta aunque Redis no esté. */
     @Volatile
     private var groupCreated = false
 
+    private val backoff = Backoff(properties.backoff, properties.maxBackoff, clock)
+
     private val operations get() = redis.opsForStream<String, String>()
 
     @Scheduled(fixedDelayString = "\${streams.poll-delay:500ms}")
     fun poll() {
+        if (backoff.isPaused()) return
         try {
             createGroup()
-            retryStuck()
-            readNew()
+            if (retryStuck()) readNew()
         } catch (e: DataAccessException) {
             // Sin el stack trace: con Redis caído esto se repite en cada vuelta.
             log.warn("No se pudo leer el stream $stream de Redis: ${e.message}")
@@ -171,52 +204,128 @@ class RedisSnippetWorker(
         groupCreated = true
     }
 
-    private fun retryStuck() {
+    /** Devuelve si se puede seguir leyendo: no si falló una dependencia. */
+    private fun retryStuck(): Boolean {
         val stuck = operations.pending(stream, properties.group, Range.unbounded<String>(), properties.batchSize, properties.retryAfter)
         for (message in stuck) {
-            if (message.totalDeliveryCount >= properties.maxAttempts) {
-                log.error("Se saltea el mensaje ${message.id} de $stream: falló las ${message.totalDeliveryCount} veces que se entregó")
-                acknowledge(message.id)
-            } else {
-                operations.claim(stream, properties.group, properties.consumer, properties.retryAfter, message.id).forEach(::handle)
+            // Si otra réplica lo retomó primero, no viene nada.
+            val record = operations.claim(stream, properties.group, properties.consumer, properties.retryAfter, message.id).firstOrNull()
+            if (record != null && !handle(Delivery(record, message.totalDeliveryCount + 1))) return false
+        }
+        return true
+    }
+
+    private fun readNew() {
+        val records =
+            operations
+                .read(
+                    Consumer.from(properties.group, properties.consumer),
+                    StreamReadOptions.empty().count(properties.batchSize),
+                    StreamOffset.create(stream, ReadOffset.lastConsumed()),
+                ).orEmpty()
+        for ((index, record) in records.withIndex()) {
+            if (!handle(Delivery(record, deliveries = 1))) {
+                // Ya se le entregaron a esta réplica: si se quedan pendientes, retomarlos les gasta un intento.
+                records.drop(index + 1).map { Delivery(it, deliveries = 1) }.forEach { requeue(it, it.deferrals) }
+                return
             }
         }
     }
 
-    private fun readNew() {
-        operations
-            .read(
-                Consumer.from(properties.group, properties.consumer),
-                StreamReadOptions.empty().count(properties.batchSize),
-                StreamOffset.create(stream, ReadOffset.lastConsumed()),
-            ).orEmpty()
-            .forEach(::handle)
-    }
-
     /**
+     * Devuelve si se puede seguir con el próximo mensaje: no si falló una dependencia.
+     *
      * Cada mensaje es una transacción de New Relic (`RedisStream/<stream>`) que continúa el trace de quien lo
      * encoló. Sin el agente, la anotación y las llamadas a NewRelic no hacen nada.
      */
     @Trace(dispatcher = true)
-    private fun handle(record: MapRecord<String, String, String>) {
+    private fun handle(delivery: Delivery): Boolean {
         NewRelic.setTransactionName("RedisStream", stream)
         NewRelic
             .getAgent()
             .transaction
-            .acceptDistributedTraceHeaders(TransportType.Queue, traceHeadersOf(record.value))
-        val id = record.value[SNIPPET_ID]?.let { runCatching { UUID.fromString(it) }.getOrNull() }
+            .acceptDistributedTraceHeaders(TransportType.Queue, traceHeadersOf(delivery.record.value))
+        val id = delivery.snippetId
         if (id == null) {
-            log.error("Se descarta el mensaje ${record.id} de $stream: no trae un $SNIPPET_ID válido")
-            acknowledge(record.id)
-            return
+            log.error("Se descarta el mensaje ${delivery.record.id} de $stream: no trae un $SNIPPET_ID válido")
+            acknowledge(delivery.record.id)
+            return true
         }
-        try {
+        if (delivery.failedAttempts >= properties.maxAttempts) {
+            log.error("Se saltea el snippet $id de $stream: ya se intentó ${delivery.failedAttempts} veces sin que terminara bien")
+            skip(delivery, id)
+            return true
+        }
+        return try {
             process(id)
-            acknowledge(record.id)
+            acknowledge(delivery.record.id)
+            backoff.reset()
+            true
         } catch (e: RuntimeException) {
             NewRelic.noticeError(e)
+            if (e.isDependencyFailure()) {
+                onDependencyFailure(delivery, id, e)
+                false
+            } else {
+                onSnippetFailure(delivery, id, e)
+                true
+            }
+        }
+    }
+
+    /** La dependencia respondió, aunque haya sido con un error: no hace falta seguir esperándola. */
+    private fun onSnippetFailure(
+        delivery: Delivery,
+        id: UUID,
+        e: RuntimeException,
+    ) {
+        backoff.reset()
+        if (delivery.failedAttempts + 1 >= properties.maxAttempts) {
+            log.error("Se saltea el snippet $id de $stream: falló las ${properties.maxAttempts} veces que se intentó", e)
+            skip(delivery, id)
+        } else {
             log.warn("No se pudo procesar el snippet $id de $stream; se reintenta en ${properties.retryAfter}", e)
         }
+    }
+
+    /** Sin el stack trace: mientras dure la caída, esto pasa una vez por pausa. */
+    private fun onDependencyFailure(
+        delivery: Delivery,
+        id: UUID,
+        e: RuntimeException,
+    ) {
+        val pause = backoff.pause()
+        if (delivery.deferrals >= properties.maxDeferrals) {
+            log.error("Se saltea el snippet $id de $stream: ya se postergó ${delivery.deferrals} veces porque falló una dependencia", e)
+            skip(delivery, id)
+        } else {
+            log.warn("Falló una dependencia procesando el snippet $id de $stream (${e.message}); se posterga y se deja de leer por $pause")
+            requeue(delivery, delivery.deferrals + 1)
+        }
+    }
+
+    /**
+     * Posterga el mensaje sin gastarle un intento: lo agrega de nuevo al final del stream, con los
+     * intentos fallidos que lleva y las veces que se lo postergó, y confirma esta copia. Primero lo
+     * agrega y después confirma: si se corta en el medio queda repetido, que no cambia nada, pero no se
+     * pierde. Que cambie de lugar en el stream tampoco, porque [process] es idempotente.
+     */
+    private fun requeue(
+        delivery: Delivery,
+        deferrals: Long,
+    ) {
+        val fields = delivery.record.value + mapOf(ATTEMPTS to delivery.failedAttempts.toString(), DEFERRALS to deferrals.toString())
+        operations.add(stream, fields, properties.trimming())
+        acknowledge(delivery.record.id)
+    }
+
+    /** Primero [giveUp] y después se confirma: si se corta en el medio, se vuelve a saltear, que da lo mismo. */
+    private fun skip(
+        delivery: Delivery,
+        id: UUID,
+    ) {
+        giveUp(id)
+        acknowledge(delivery.record.id)
     }
 
     private fun acknowledge(id: RecordId) {
@@ -228,7 +337,33 @@ class RedisSnippetWorker(
     }
 }
 
+/**
+ * Un mensaje como le llegó al worker. [deliveries] es cuántas veces Redis entregó esta copia, contando
+ * esta; lo que les pasó a las copias anteriores, si se lo postergó, viene en el mensaje.
+ */
+private class Delivery(
+    val record: MapRecord<String, String, String>,
+    deliveries: Long,
+) {
+    val snippetId: UUID? = record.value[SNIPPET_ID]?.let { runCatching { UUID.fromString(it) }.getOrNull() }
+
+    /** Los intentos que fallaron antes de este, sin contar las veces que se lo postergó. */
+    val failedAttempts: Long = count(ATTEMPTS) + deliveries - 1
+
+    val deferrals: Long = count(DEFERRALS)
+
+    private fun count(field: String) = record.value[field]?.toLongOrNull() ?: 0
+}
+
 const val SNIPPET_ID = "snippetId"
+
+/** Los intentos que fallaron por el snippet en copias anteriores del mensaje, que se postergaron. */
+const val ATTEMPTS = "attempts"
+
+/** Cuántas veces se postergó el mensaje porque falló una dependencia. */
+const val DEFERRALS = "deferrals"
+
+private fun StreamProperties.trimming() = XAddOptions.maxlen(maxLength).approximateTrimming(true)
 
 /** Los headers con los que New Relic continúa un trace en otro proceso, para guardarlos en un mensaje. */
 private fun traceHeaders(): Map<String, String> {
@@ -237,6 +372,6 @@ private fun traceHeaders(): Map<String, String> {
     return headers.headerNames.associateWith { headers.getHeader(it) }
 }
 
-/** Los headers de trace que trae un mensaje: todos sus campos menos el id del snippet. */
+/** Los headers de trace que trae un mensaje: todos sus campos menos los que son del worker. */
 private fun traceHeadersOf(fields: Map<String, String>) =
-    ConcurrentHashMapHeaders.buildFromFlatMap(HeaderType.MESSAGE, fields.filterKeys { it != SNIPPET_ID })
+    ConcurrentHashMapHeaders.buildFromFlatMap(HeaderType.MESSAGE, fields - setOf(SNIPPET_ID, ATTEMPTS, DEFERRALS))

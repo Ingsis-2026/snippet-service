@@ -32,6 +32,7 @@ class InventoryReporter(
                 "compliant" to (byStatus[ValidityStatus.COMPLIANT] ?: 0L),
                 "notCompliant" to (byStatus[ValidityStatus.NOT_COMPLIANT] ?: 0L),
                 "invalid" to (byStatus[ValidityStatus.INVALID] ?: 0L),
+                "error" to (byStatus[ValidityStatus.ERROR] ?: 0L),
             ),
         )
     }

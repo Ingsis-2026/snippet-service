@@ -17,6 +17,7 @@ import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import org.springframework.transaction.event.TransactionPhase
 import org.springframework.transaction.event.TransactionalEventListener
+import java.time.Instant
 import java.util.UUID
 
 /** Todo lo que el usuario provee de un snippet, tanto al crearlo como al actualizarlo. */
@@ -250,6 +251,7 @@ class SnippetService(
             language = data.language
             version = data.version
             status = ValidityStatus.PENDING
+            statusChangedAt = Instant.now()
         }
         val saved = repository.save(snippet)
         contents.save(id, data.content)
