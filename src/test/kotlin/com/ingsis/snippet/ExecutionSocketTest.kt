@@ -74,6 +74,8 @@ class ExecutionSocketTest(
         Mockito.`when`(jwtDecoder.decode("token-de-ana")).thenReturn(jwt("auth0|ana"))
         Mockito.`when`(jwtDecoder.decode("token-de-beto")).thenReturn(jwt("auth0|beto"))
         Mockito.`when`(jwtDecoder.decode("token-de-carla")).thenReturn(jwt("auth0|carla"))
+        Mockito.`when`(jwtDecoder.decode("token-sin-scopes")).thenReturn(jwt("auth0|ana", scope = null))
+        Mockito.`when`(jwtDecoder.decode("token-de-escritura")).thenReturn(jwt("auth0|ana", scope = "write:snippets"))
         Mockito.`when`(jwtDecoder.decode("vencido")).thenThrow(BadJwtException("Jwt expired"))
         language.reset()
     }
@@ -85,12 +87,16 @@ class ExecutionSocketTest(
         snippets.deleteAll()
     }
 
-    private fun jwt(subject: String) =
-        Jwt
-            .withTokenValue("t")
-            .header("alg", "none")
-            .subject(subject)
-            .build()
+    /** Como los de Auth0: `scope` es un texto con los scopes separados por espacios. */
+    private fun jwt(
+        subject: String,
+        scope: String? = "openid read:snippets write:snippets",
+    ) = Jwt
+        .withTokenValue("t")
+        .header("alg", "none")
+        .subject(subject)
+        .apply { scope?.let { claim("scope", it) } }
+        .build()
 
     /** Lo que recibe el navegador, en orden; `closed` al final si se cerró la conexión. */
     private inner class Browser(
@@ -230,6 +236,13 @@ class ExecutionSocketTest(
     fun `sin token, o con uno que no es valido, no se corre nada`() {
         Browser().apply { start(token = null) }.expectFailure("Falta el token")
         Browser().apply { start(token = "vencido") }.expectFailure("El token no es válido")
+        assertTrue(language.noneStarted())
+    }
+
+    @Test
+    fun `sin el scope de lectura no se corre nada`() {
+        Browser().apply { start(token = "token-sin-scopes") }.expectFailure("El token no tiene permiso para correr snippets")
+        Browser().apply { start(token = "token-de-escritura") }.expectFailure("El token no tiene permiso para correr snippets")
         assertTrue(language.noneStarted())
     }
 

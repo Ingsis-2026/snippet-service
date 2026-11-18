@@ -1,10 +1,12 @@
 package com.ingsis.snippet.execution
 
 import com.ingsis.snippet.CorsProperties
+import com.ingsis.snippet.READ_SNIPPETS
 import com.ingsis.snippet.clients.CodeError
 import com.ingsis.snippet.clients.RunOutcome
 import com.ingsis.snippet.observability.USER
 import com.ingsis.snippet.observability.withLogContext
+import com.ingsis.snippet.scopeAuthority
 import com.ingsis.snippet.snippets.NoAccessException
 import com.ingsis.snippet.snippets.SnippetAccess
 import com.ingsis.snippet.snippets.SnippetNotFoundException
@@ -15,8 +17,10 @@ import com.ingsis.snippet.tests.TestToRun
 import com.ingsis.snippet.tests.passes
 import org.slf4j.LoggerFactory
 import org.springframework.context.annotation.Configuration
+import org.springframework.security.oauth2.jwt.Jwt
 import org.springframework.security.oauth2.jwt.JwtDecoder
 import org.springframework.security.oauth2.jwt.JwtException
+import org.springframework.security.oauth2.server.resource.authentication.JwtGrantedAuthoritiesConverter
 import org.springframework.stereotype.Component
 import org.springframework.web.socket.CloseStatus
 import org.springframework.web.socket.TextMessage
@@ -88,7 +92,9 @@ data class FailureMessage(
  * El navegador no puede mandar headers al abrir un WebSocket, así que el token viaja en el primer
  * mensaje y no en `Authorization`. Tampoco en la URL: quedaría en los logs de nginx. Se valida con
  * el mismo [JwtDecoder] que usa Spring Security para el resto de la API (firma, issuer,
- * vencimiento y audience).
+ * vencimiento y audience), y tiene que tener el scope [READ_SNIPPETS], igual que para ver el snippet
+ * o correr un test por `POST`. Los scopes se leen con el mismo converter que usa Spring Security por
+ * defecto, así un token vale lo mismo acá que en el resto de la API.
  */
 @Component
 class ExecutionHandler(
@@ -101,6 +107,7 @@ class ExecutionHandler(
 ) : TextWebSocketHandler() {
     private val log = LoggerFactory.getLogger(javaClass)
     private val runs = ConcurrentHashMap<String, Run>()
+    private val scopes = JwtGrantedAuthoritiesConverter()
 
     private class Run(
         val session: WebSocketSession,
@@ -150,12 +157,14 @@ class ExecutionHandler(
         if (run.started) return fail(run, "La ejecución ya empezó")
         run.started = true
         val token = request.token ?: return fail(run, "Falta el token")
-        val userId =
+        val jwt =
             try {
-                jwtDecoder.decode(token).subject
+                jwtDecoder.decode(token)
             } catch (e: JwtException) {
                 null
             } ?: return fail(run, "El token no es válido")
+        if (!jwt.canRead()) return fail(run, "El token no tiene permiso para correr snippets")
+        val userId = jwt.subject ?: return fail(run, "El token no es válido")
         val snippetId = request.snippetId ?: return fail(run, "Falta el snippet")
         try {
             val snippet = access.requireReader(snippetId, userId)
@@ -177,6 +186,8 @@ class ExecutionHandler(
             fail(run, "No se pudo empezar la ejecución")
         }
     }
+
+    private fun Jwt.canRead() = scopes.convert(this)!!.any { it.authority == scopeAuthority(READ_SNIPPETS) }
 
     private fun input(
         run: Run,

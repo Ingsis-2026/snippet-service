@@ -31,6 +31,4 @@ class RequestIdForwarding(
         }
         return execution.execute(request, body)
     }
-
-    private fun originOf(uri: URI) = Triple(uri.scheme, uri.host, uri.port)
 }

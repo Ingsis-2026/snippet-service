@@ -42,10 +42,16 @@ data class SnippetCreatedEvent(
     val snippet: Snippet,
 )
 
-/** Se actualizó un snippet. Se publica dentro del update y se atiende cuando quedó guardado (US16). */
+/**
+ * Se actualizó un snippet. Se publica dentro del update y se atiende cuando quedó guardado (US16).
+ *
+ * [revision] identifica a este update. Los tests que se corren por él solo guardan su resultado si ningún
+ * update posterior los volvió a dejar `PENDING` (ver [com.ingsis.snippet.tests.TestCaseService.runAll]).
+ */
 data class SnippetUpdatedEvent(
     val snippet: Snippet,
     val content: String,
+    val revision: UUID = UUID.randomUUID(),
 )
 
 /**
