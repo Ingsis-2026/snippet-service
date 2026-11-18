@@ -16,6 +16,11 @@ parser:
 observability:
   enabled: false
 
+# Los pendientes no se barren solos: los tests llaman a StuckLintSweeper.sweep().
+linting:
+  sweep:
+    enabled: false
+
 # Sin Redis: las colas son RecordingLintQueue y RecordingFormatQueue, en memoria.
 streams:
   redis:

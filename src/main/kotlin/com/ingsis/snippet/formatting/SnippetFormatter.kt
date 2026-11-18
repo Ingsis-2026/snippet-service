@@ -23,7 +23,10 @@ fun interface FormatQueue {
     fun enqueue(snippetIds: Collection<UUID>)
 }
 
-/** Formatea un snippet con las reglas de su owner y guarda el código formateado (US12). */
+/**
+ * Formatea un snippet con las reglas de su owner y guarda el código formateado (US12). Reemplaza
+ * solo el código actual: el original, como lo escribió el usuario, se sigue descargando tal cual (US13).
+ */
 @Service
 class SnippetFormatter(
     private val repository: SnippetRepository,
@@ -63,7 +66,16 @@ class SnippetFormatter(
     }
 }
 
-/** Decide qué snippets se encolan para formatear y cuándo. */
+/**
+ * Decide qué snippets se encolan para formatear y cuándo.
+ *
+ * A diferencia del linteo, formatear no tiene un estado `PENDING` ni un barrido que vuelva a encolar
+ * lo que se perdió ([com.ingsis.snippet.linting.StuckLintSweeper]). Si Redis no responde al encolar,
+ * los snippets se quedan con el código que tenían: sigue siendo válido, cumple las reglas de lint como
+ * antes y se puede descargar formateado con las reglas nuevas (US13), que se aplican en el momento.
+ * Para saber cuáles faltan habría que guardar en cada snippet con qué reglas se formateó, y no vale la
+ * pena para algo que se arregla volviendo a guardar las reglas. Lo que sí queda es el log del error.
+ */
 @Component
 class FormatScheduler(
     private val repository: SnippetRepository,

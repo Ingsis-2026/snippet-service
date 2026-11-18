@@ -29,12 +29,25 @@ spring:
     redis:
       host: ${REDIS_HOST:localhost}
       port: ${REDIS_PORT:6379}
+  # Las tareas programadas (los dos workers de los streams, el barrido de pendientes, la versión del
+  # parser y los reportes a New Relic) corren en paralelo: con un solo hilo, una tanda lenta de
+  # formateos frenaba el linteo y todo lo demás. Spring nunca corre dos vueltas de la misma tarea a la vez.
+  task:
+    scheduling:
+      pool:
+        size: ${SCHEDULING_POOL_SIZE:4}
 
 services:
   permission-url: ${PERMISSION_URL:http://localhost:8081}
   language-url: ${LANGUAGE_URL:http://localhost:8082}
   # El código de los snippets lo guarda asset-service, que lo pone en Azurite.
   asset-url: ${ASSET_URL:http://localhost:8083}
+  # Cuánto se espera a cada servicio (y a Auth0) antes de darlo por caído. language-service tiene más margen:
+  # corre el código del snippet antes de responder.
+  timeouts:
+    connect: ${HTTP_CONNECT_TIMEOUT:2s}
+    read: ${HTTP_READ_TIMEOUT:10s}
+    language-read: ${LANGUAGE_READ_TIMEOUT:30s}
 
 # El container de asset-service donde va el código, un asset por snippet.
 storage:
@@ -42,11 +55,14 @@ storage:
 
 auth0:
   domain: ${AUTH0_DOMAIN:dev-2fvmkxju8g70kqvs.us.auth0.com}
-  # La aplicación machine-to-machine con la que se buscan usuarios para compartir (US7), con
-  # read:users en la Management API. El secret no tiene default: va solo en el entorno.
+  # La aplicación machine-to-machine del servicio. Con read:users en la Management API busca usuarios
+  # para compartir (US7), y autorizada en la API interna pide el token con el que llama a
+  # permission-service y language-service. El secret no tiene default: va solo en el entorno.
   management:
     client-id: ${AUTH0_M2M_CLIENT_ID:}
     client-secret: ${AUTH0_M2M_CLIENT_SECRET:}
+  # El identifier de la API interna en Auth0: la audience que validan permission-service y language-service.
+  internal-audience: ${AUTH0_INTERNAL_AUDIENCE:https://snippet-searcher/internal}
 
 # Origins de otros dominios que pueden llamar a la API desde el navegador, separados por comas.
 cors:
@@ -72,3 +88,21 @@ management:
 observability:
   initial-delay: ${OBSERVABILITY_INITIAL_DELAY:1m}
   interval: ${OBSERVABILITY_INTERVAL:1m}
+
+# Con LOG_FORMAT=ecs, como en la imagen de Docker, los logs salen en JSON (Elastic Common Schema): una línea por
+# log con el servicio (service.name), el MDC (requestId, user...) y el stack trace como campos. Sin LOG_FORMAT
+# salen en texto, que es lo cómodo para leerlos corriendo desde el IDE o en los tests; el MDC va entre corchetes
+# antes del logger (el replace saca los corchetes vacíos de los logs que no tienen contexto).
+logging:
+  structured:
+    format:
+      console: ${LOG_FORMAT:}
+  pattern:
+    correlation: '%replace([%mdc] ){''^\[\] $'', ''''}'
+
+# Cada cuánto se buscan snippets que quedaron PENDING sin un mensaje que los vaya a lintear, y cuánto
+# tienen que llevar así para volver a encolarlos.
+linting:
+  sweep:
+    interval: ${LINT_SWEEP_INTERVAL:5m}
+    stuck-after: ${LINT_SWEEP_STUCK_AFTER:10m}

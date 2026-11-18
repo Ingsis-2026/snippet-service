@@ -44,6 +44,14 @@ class SnippetLinter(
         val snippet = repository.findById(id).getOrNull() ?: return
         repository.updateStatus(id, snippets.statusOf(snippet))
     }
+
+    /**
+     * El worker se dio por vencido con este snippet: falló todas las veces que lo intentó. Queda
+     * `ERROR` en vez de `PENDING` para siempre, así el usuario sabe que no se lo pudo evaluar.
+     */
+    fun giveUp(id: UUID) {
+        repository.markError(id)
+    }
 }
 
 /** Decide qué snippets se encolan para lintear y cuándo. */

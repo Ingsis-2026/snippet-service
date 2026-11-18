@@ -5,12 +5,16 @@ import com.ingsis.snippet.execution.ExecutionListener
 import com.ingsis.snippet.execution.ExecutionRequest
 import com.ingsis.snippet.execution.LanguageUnavailableException
 import com.ingsis.snippet.execution.WebSocketLanguageExecutor
+import com.ingsis.snippet.observability.REQUEST_ID
+import com.ingsis.snippet.observability.withLogContext
 import jakarta.servlet.ServletContainerInitializer
 import jakarta.servlet.http.HttpServlet
 import jakarta.websocket.Endpoint
 import jakarta.websocket.EndpointConfig
+import jakarta.websocket.HandshakeResponse
 import jakarta.websocket.MessageHandler
 import jakarta.websocket.Session
+import jakarta.websocket.server.HandshakeRequest
 import jakarta.websocket.server.ServerContainer
 import jakarta.websocket.server.ServerEndpointConfig
 import org.apache.catalina.startup.Tomcat
@@ -42,6 +46,15 @@ class WebSocketLanguageExecutorTest {
 
     /** Lo que le avisó el executor al listener, en orden. */
     private val events = LinkedBlockingQueue<String>()
+
+    /** El token del servicio que usa el executor; null si no hay aplicación machine-to-machine. */
+    private var serviceToken: String? = "token-del-servicio"
+
+    /** El header `Authorization` con que se abrió cada conexión, o "ninguno". */
+    private val authorizations = LinkedBlockingQueue<String>()
+
+    /** El header `X-Request-Id` con que se abrió cada conexión, o "ninguno". */
+    private val requestIds = LinkedBlockingQueue<String>()
 
     private val listener =
         object : ExecutionListener {
@@ -121,6 +134,22 @@ class WebSocketLanguageExecutorTest {
                             object : ServerEndpointConfig.Configurator() {
                                 @Suppress("UNCHECKED_CAST")
                                 override fun <T> getEndpointInstance(endpointClass: Class<T>): T = endpoint as T
+
+                                override fun modifyHandshake(
+                                    config: ServerEndpointConfig,
+                                    request: HandshakeRequest,
+                                    response: HandshakeResponse,
+                                ) {
+                                    val header = request.headers.entries.firstOrNull { it.key.equals("Authorization", true) }
+                                    authorizations.put(header?.value?.single() ?: "ninguno")
+                                    requestIds.put(
+                                        request.headers.entries
+                                            .firstOrNull { it.key.equals("X-Request-Id", true) }
+                                            ?.value
+                                            ?.single()
+                                            ?: "ninguno",
+                                    )
+                                }
                             },
                         ).build(),
                 )
@@ -129,7 +158,7 @@ class WebSocketLanguageExecutorTest {
         )
         tomcat.connector
         tomcat.start()
-        executor = WebSocketLanguageExecutor("http://localhost:${tomcat.connector.localPort}", json)
+        executor = WebSocketLanguageExecutor("http://localhost:${tomcat.connector.localPort}", json, { serviceToken })
     }
 
     @AfterEach
@@ -171,6 +200,31 @@ class WebSocketLanguageExecutorTest {
     }
 
     @Test
+    fun `abre la conexion con el token del servicio`() {
+        executor.start(request("espera"), listener)
+
+        assertEquals("Bearer token-del-servicio", authorizations.poll(5, TimeUnit.SECONDS))
+    }
+
+    @Test
+    fun `abre la conexion con el id del pedido que se esta atendiendo`() {
+        withLogContext(REQUEST_ID to "pedido-1") { executor.start(request("espera"), listener) }
+        executor.start(request("espera"), listener)
+
+        assertEquals("pedido-1", requestIds.poll(5, TimeUnit.SECONDS))
+        assertEquals("ninguno", requestIds.poll(5, TimeUnit.SECONDS))
+    }
+
+    @Test
+    fun `sin aplicacion machine-to-machine la abre sin token`() {
+        serviceToken = null
+
+        executor.start(request("espera"), listener)
+
+        assertEquals("ninguno", authorizations.poll(5, TimeUnit.SECONDS))
+    }
+
+    @Test
     fun `un failure de language-service se avisa`() {
         executor.start(request("falla"), listener)
 
@@ -201,7 +255,7 @@ class WebSocketLanguageExecutorTest {
         tomcat.stop()
 
         assertThrows<LanguageUnavailableException> {
-            WebSocketLanguageExecutor("http://localhost:$port", json).start(request("saluda"), listener)
+            WebSocketLanguageExecutor("http://localhost:$port", json, { serviceToken }).start(request("saluda"), listener)
         }
     }
 }

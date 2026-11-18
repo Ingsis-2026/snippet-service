@@ -4,6 +4,8 @@ import com.ingsis.snippet.clients.CodeError
 import com.ingsis.snippet.clients.LanguageClient
 import com.ingsis.snippet.clients.PermissionClient
 import com.ingsis.snippet.observability.Telemetry
+import com.ingsis.snippet.observability.USER
+import com.ingsis.snippet.observability.withLogContext
 import com.ingsis.snippet.rules.RuleService
 import com.ingsis.snippet.rules.RuleType
 import com.ingsis.snippet.storage.ContentStore
@@ -17,6 +19,7 @@ import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import org.springframework.transaction.event.TransactionPhase
 import org.springframework.transaction.event.TransactionalEventListener
+import java.time.Instant
 import java.util.UUID
 
 /** Todo lo que el usuario provee de un snippet, tanto al crearlo como al actualizarlo. */
@@ -39,10 +42,16 @@ data class SnippetCreatedEvent(
     val snippet: Snippet,
 )
 
-/** Se actualizó un snippet. Se publica dentro del update y se atiende cuando quedó guardado (US16). */
+/**
+ * Se actualizó un snippet. Se publica dentro del update y se atiende cuando quedó guardado (US16).
+ *
+ * [revision] identifica a este update. Los tests que se corren por él solo guardan su resultado si ningún
+ * update posterior los volvió a dejar `PENDING` (ver [com.ingsis.snippet.tests.TestCaseService.runAll]).
+ */
 data class SnippetUpdatedEvent(
     val snippet: Snippet,
     val content: String,
+    val revision: UUID = UUID.randomUUID(),
 )
 
 /**
@@ -94,7 +103,7 @@ class SnippetService(
     ): SnippetWithContent {
         validate(data)
         val snippet = repository.save(Snippet(data.name, data.description, data.language, data.version, ownerId))
-        contents.save(snippet.id!!, data.content)
+        saveWritten(snippet.id!!, data.content)
         permissionClient.grantOwner(snippet.id!!, ownerId)
         events.publishEvent(SnippetCreatedEvent(snippet))
         return SnippetWithContent(snippet, data.content)
@@ -138,7 +147,9 @@ class SnippetService(
     private fun checkNoneHidden(userId: String) {
         val owned = repository.countByOwnerId(userId)
         if (owned == 0L) return
-        log.error("$userId tiene $owned snippets en la base, pero permission-service no le devuelve ninguno")
+        withLogContext(USER to userId, "ownedSnippets" to owned) {
+            log.error("El usuario tiene snippets en la base, pero permission-service no le devuelve ninguno")
+        }
         telemetry.recordEvent(HIDDEN_EVENT, mapOf("userId" to userId, "owned" to owned))
     }
 
@@ -173,8 +184,14 @@ class SnippetService(
     }
 
     /**
-     * US13: el snippet como archivo, tal cual o formateado. Igual que con el lint, se formatea con
-     * las reglas de su owner, y lo descarga cualquiera que pueda verlo.
+     * US13: el snippet como archivo, tal cual o formateado. Lo descarga cualquiera que pueda verlo.
+     *
+     * Tal cual es como lo escribió el usuario la última vez, aunque el formateo automático (US12) ya
+     * haya formateado el código actual. Un snippet de antes de que se guardara el original no lo
+     * tiene, y se descarga el actual.
+     *
+     * Formateado es el código actual con las reglas de formato de su owner como están ahora, igual
+     * que con el lint: si cambiaron y el worker todavía no lo formateó, ya sale con las nuevas.
      */
     @Transactional(readOnly = true)
     fun download(
@@ -183,8 +200,7 @@ class SnippetService(
         formatted: Boolean,
     ): SnippetFile {
         val snippet = access.requireReader(id, userId)
-        val original = contents.load(id)
-        val content = if (formatted) formatted(snippet, original) else original
+        val content = if (formatted) formatted(snippet, contents.load(id)) else contents.loadOriginal(id) ?: contents.load(id)
         return SnippetFile("${snippet.name}.${extensionOf(snippet.language)}", content)
     }
 
@@ -250,9 +266,10 @@ class SnippetService(
             language = data.language
             version = data.version
             status = ValidityStatus.PENDING
+            statusChangedAt = Instant.now()
         }
         val saved = repository.save(snippet)
-        contents.save(id, data.content)
+        saveWritten(id, data.content)
         events.publishEvent(SnippetUpdatedEvent(saved, data.content))
         return SnippetWithContent(saved, data.content)
     }
@@ -265,8 +282,8 @@ class SnippetService(
      * fallara la base quedaría un snippet sin permisos, que nadie vería, ni su owner para volver
      * a borrarlo.
      *
-     * El código se borra recién cuando quedó todo borrado, y si falla solo se loguea: queda un
-     * asset que nadie lee, pero el snippet ya no existe.
+     * El código, el actual y el original, se borra recién cuando quedó todo borrado, y si falla solo
+     * se loguea: queda un asset que nadie lee, pero el snippet ya no existe.
      */
     @Transactional
     fun delete(
@@ -285,8 +302,23 @@ class SnippetService(
         try {
             contents.delete(event.snippetId)
         } catch (e: StorageException) {
-            log.warn("Se borró el snippet ${event.snippetId} pero no su código", e)
+            withLogContext("snippetId" to event.snippetId) { log.warn("Se borró el snippet pero no su código", e) }
         }
+    }
+
+    /**
+     * El código que escribió el usuario es el actual y también su original (US13). El original va
+     * primero: si después falla guardar el actual, se deshace la transacción y el snippet sigue con
+     * el código que tenía, que es el que se lintea y se ejecuta; solo el original queda adelantado
+     * hasta que el usuario lo vuelva a guardar. En el orden inverso, el código actual podría cambiar
+     * sin que el snippet vuelva a `PENDING` ni se corran sus tests.
+     */
+    private fun saveWritten(
+        id: UUID,
+        content: String,
+    ) {
+        contents.saveOriginal(id, content)
+        contents.save(id, content)
     }
 
     private fun withContent(snippet: Snippet) = SnippetWithContent(snippet, contents.load(snippet.id!!))

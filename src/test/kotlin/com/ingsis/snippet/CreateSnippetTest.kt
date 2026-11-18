@@ -71,6 +71,7 @@ class CreateSnippetTest(
 
         val saved = repository.findAll().single()
         assertEquals(code, contents.load(saved.id!!))
+        assertEquals(code, contents.loadOriginal(saved.id!!))
         assertEquals(ValidityStatus.PENDING, saved.status)
         verify(permissionClient).grantOwner(saved.id!!, "auth0|ana")
     }
@@ -169,6 +170,7 @@ class CreateSnippetTest(
 
         val saved = repository.findAll().single()
         assertEquals(code, contents.load(saved.id!!))
+        assertEquals(code, contents.loadOriginal(saved.id!!))
         verify(permissionClient).grantOwner(saved.id!!, "auth0|ana")
     }
 

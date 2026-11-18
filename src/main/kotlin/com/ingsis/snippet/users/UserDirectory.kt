@@ -1,14 +1,12 @@
 package com.ingsis.snippet.users
 
 import com.fasterxml.jackson.annotation.JsonProperty
+import com.ingsis.snippet.auth.Auth0ClientCredentials
 import org.springframework.beans.factory.annotation.Value
-import org.springframework.http.MediaType
 import org.springframework.stereotype.Component
 import org.springframework.web.client.RestClient
 import org.springframework.web.client.RestClientException
 import org.springframework.web.client.body
-import java.time.Clock
-import java.time.Instant
 
 /** Un usuario con el que se puede compartir un snippet (US7). [id] es su `sub`, el que guarda permission-service. */
 data class UserSummary(
@@ -25,18 +23,6 @@ data class UserPage(
     val total: Long,
 )
 
-internal data class TokenRequest(
-    @JsonProperty("grant_type") val grantType: String,
-    @JsonProperty("client_id") val clientId: String,
-    @JsonProperty("client_secret") val clientSecret: String,
-    val audience: String,
-)
-
-internal data class TokenResponse(
-    @JsonProperty("access_token") val accessToken: String,
-    @JsonProperty("expires_in") val expiresIn: Long,
-)
-
 internal data class Auth0User(
     @JsonProperty("user_id") val userId: String,
     val name: String?,
@@ -49,10 +35,8 @@ internal data class Auth0UserPage(
 )
 
 /**
- * Los usuarios de Auth0, por la Management API (`GET /api/v2/users`). Entra con una aplicación
- * machine-to-machine que tiene `read:users`: pide un token con client credentials y lo reusa hasta
- * un minuto antes de que venza, porque Auth0 limita cuántos tokens machine-to-machine se emiten
- * por mes.
+ * Los usuarios de Auth0, por la Management API (`GET /api/v2/users`). Entra con la aplicación
+ * machine-to-machine del servicio, que tiene `read:users` (ver [Auth0ClientCredentials]).
  *
  * Sin client ID o secret configurados no hay búsqueda: [search] falla con [UsersUnavailableException].
  * El servicio arranca igual, así que el resto anda en local sin la aplicación machine-to-machine.
@@ -61,14 +45,9 @@ internal data class Auth0UserPage(
 class UserDirectory(
     builder: RestClient.Builder,
     @Value("\${auth0.domain}") private val domain: String,
-    @Value("\${auth0.management.client-id}") private val clientId: String,
-    @Value("\${auth0.management.client-secret}") private val clientSecret: String,
-    private val clock: Clock = Clock.systemUTC(),
+    private val credentials: Auth0ClientCredentials,
 ) {
     private val client = builder.baseUrl("https://$domain").build()
-
-    @Volatile
-    private var token: CachedToken? = null
 
     /**
      * Los usuarios cuyo nombre o email empiezan con [name], sin [excludedId]: el que comparte no
@@ -115,25 +94,10 @@ class UserDirectory(
     }
 
     private fun accessToken(): String {
-        token?.takeIf { it.validUntil.isAfter(clock.instant()) }?.let { return it.value }
-        if (clientId.isBlank() ||
-            clientSecret.isBlank()
-        ) {
+        if (!credentials.configured) {
             throw UsersUnavailableException("Falta configurar la aplicación de Auth0 para buscar usuarios")
         }
-        val response =
-            calling {
-                client
-                    .post()
-                    .uri("/oauth/token")
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .body(TokenRequest("client_credentials", clientId, clientSecret, "https://$domain/api/v2/"))
-                    .retrieve()
-                    .body<TokenResponse>()!!
-            }
-        return CachedToken(response.accessToken, clock.instant().plusSeconds(response.expiresIn - 60))
-            .also { token = it }
-            .value
+        return calling { credentials.token("https://$domain/api/v2/") }
     }
 
     private fun <T> calling(block: () -> T): T =
@@ -144,11 +108,6 @@ class UserDirectory(
         }
 
     private fun Auth0User.toSummary() = UserSummary(userId, name ?: email ?: userId, email)
-
-    private data class CachedToken(
-        val value: String,
-        val validUntil: Instant,
-    )
 
     private companion object {
         /** Lo que tiene un significado en la sintaxis de búsqueda de Auth0 (Lucene) se escapa, espacios incluidos. */

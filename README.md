@@ -5,10 +5,10 @@ Parte de **Snippet Searcher** (Ingeniería de Sistemas 2026). Es el servicio al 
 ## De qué es dueño
 
 - **Metadata de cada snippet** (nombre, descripción, lenguaje, versión, owner) en su propio Postgres.
-- **Código de cada snippet**, en el [asset-service](https://github.com/austral-ingsis/asset-service) de la cátedra: un asset por snippet en el container `snippets`, que se llama como su id. asset-service lo guarda en Azure Blob Storage; en local y en las VMs es Azurite, el emulador de Azure Storage. snippet-service no habla con Azurite.
+- **Código de cada snippet**, en el [asset-service](https://github.com/austral-ingsis/asset-service) de la cátedra, en dos assets por snippet en el container `snippets`: el código actual, que se llama como su id, y el original, como lo escribió el usuario al crearlo o actualizarlo, que se llama `<id>-original` (ver [Formato](#linteo-y-formateo-automáticos)). asset-service los guarda en Azure Blob Storage; en local y en las VMs es Azurite, el emulador de Azure Storage. snippet-service no habla con Azurite.
 - **Tests de cada snippet**: inputs y outputs esperados (US8). Correrlos es trabajo de `language-service`.
 - **Reglas de lint y formato elegidas por cada usuario** (US11, US14). Se le pasan a `language-service` en cada llamada.
-- **Estado de validez de cada snippet** (`PENDING` / `COMPLIANT` / `NOT_COMPLIANT` / `INVALID`), persistido, para poder filtrar y ordenar por él (US5).
+- **Estado de validez de cada snippet** (`PENDING` / `COMPLIANT` / `NOT_COMPLIANT` / `INVALID` / `ERROR`), persistido, para poder filtrar y ordenar por él (US5).
 - **Las colas de snippets a lintear (US15) y a formatear (US12)**, en streams de Redis. Ver [Linteo y formateo automáticos](#linteo-y-formateo-automáticos).
 
 ## De qué no es dueño
@@ -31,12 +31,17 @@ Lo mismo pasa al crear o actualizar un snippet: se encola para lintearlo.
 **Formato.**
 
 1. Una vez guardadas las reglas, se encola cada snippet del usuario en el stream `format-requests` y se responde.
-2. Otro worker, con el mismo consumer group, lo formatea en language-service con el código y las reglas que hay en ese momento. Si el código cambió, el snippet pasa a `PENDING`, se guarda el código formateado y se encola en `lint-requests`, porque el linteo que tenía era del código anterior. Recién ahí confirma el mensaje.
+2. Otro worker, con el mismo consumer group, lo formatea en language-service con el código y las reglas que hay en ese momento. Si el código cambió, el snippet pasa a `PENDING`, se guarda el código formateado como el actual y se encola en `lint-requests`, porque el linteo que tenía era del código anterior. Recién ahí confirma el mensaje. El original no se toca: es el que se descarga sin formatear (US13), y el formateado sale de aplicarle al actual las reglas que hay en ese momento. Un snippet creado antes de que se guardara el original no lo tiene, y sin formatear se descarga el actual.
 3. Si el owner editó el snippet mientras se formateaba, no se pisa su código: queda el que guardó él.
 
 **Por qué dos streams y no uno con el tipo de trabajo.** Formatear es lo más pesado y cada formateo termina encolando un linteo: en un solo stream, una tanda grande de formateos dejaría esperando detrás suyo el linteo de un snippet recién creado. Con uno por tipo, cada worker avanza por su cuenta, el backlog y los pendientes de cada uno se ven por separado (`XLEN`, `XPENDING`), y el mensaje sigue siendo solo el id del snippet. El worker es el mismo código para los dos (`RedisSnippetWorker`); solo cambia qué hace con cada snippet.
 
-**Tolerancia a fallos.** Un mensaje que falla, o que quedó a medias porque se cayó el servicio, sigue pendiente en Redis. Pasado `streams.retry-after` (1 minuto) lo retoma cualquier réplica (`XCLAIM`). Después de `streams.max-attempts` entregas (3) se saltea: se confirma sin procesar para no frenar al resto. Un snippet que no se pudo lintear queda `PENDING`; uno que no se pudo formatear queda con el código que tenía.
+**Tolerancia a fallos.** No es lo mismo que falle el snippet que algo de lo que depende.
+
+- **Falla el snippet** (por ejemplo, language-service responde 4xx). El mensaje sigue pendiente en Redis, igual que uno que quedó a medias porque se cayó el servicio. Pasado `streams.retry-after` (1 minuto) lo retoma cualquier réplica (`XCLAIM`). Al fallar `streams.max-attempts` veces (3) se saltea: se confirma sin procesar para no frenar al resto. Un snippet que no se pudo lintear queda `ERROR` («no se pudo evaluar»); uno que no se pudo formatear queda con el código que tenía.
+- **Falla una dependencia**: language-service o asset-service no responden (o tardan más que su timeout, ver `HTTP_READ_TIMEOUT`), responden 5xx o 429, o no hay conexión con la base o Redis. No es culpa del snippet, así que no se le gasta un intento: se lo vuelve a agregar al final del stream y se confirma la copia vieja, lo mismo que con los que quedaban de la tanda. El worker deja de leer por `streams.backoff` (10 s), y cada falla seguida duplica la pausa hasta `streams.max-backoff` (5 minutos). Los mensajes postergados llevan, además de `snippetId`, los campos `attempts` (intentos fallidos de las copias anteriores) y `deferrals` (cuántas veces se lo postergó). Para que un snippet que hace responder 500 a language-service no se postergue para siempre, después de `streams.max-deferrals` (20) postergaciones también se saltea.
+
+Encolar pasa después de guardar el cambio, fuera de la transacción: si Redis no responde en ese momento, o el servicio se cae a mitad de camino, el snippet queda `PENDING` sin un mensaje que lo vaya a lintear. Cada `linting.sweep.interval` (5 minutos) se vuelven a encolar los que llevan más de `linting.sweep.stuck-after` (10 minutos) `PENDING`; para eso cada snippet guarda desde cuándo está en su estado (`status_changed_at`). El formateo no tiene un estado pendiente ni este barrido: si se pierde un formateo, el snippet sigue con su código, que es válido, y se lo puede descargar formateado con las reglas nuevas (US13).
 
 Los dos son idempotentes: se usa el estado actual, no el del momento en que se encoló, y formatear código ya formateado no lo cambia. Por eso da igual que un snippet se procese dos veces o en otro orden. Si se corta entre guardar el código formateado y encolarlo para lintear, el reintento lo encola igual, porque el snippet ya quedó `PENDING`.
 
@@ -51,6 +56,43 @@ Los dos son idempotentes: se usa el estado actual, no el del momento en que se e
 
 La primera vez que corre no hay versión guardada, así que se validan todos los snippets que ya estaban.
 
+## Scopes
+
+Además de un access token válido para esta API, cada endpoint pide un scope de Auth0. Los dos son permisos de la API `https://snippet-searcher/api` en Auth0, y la UI los pide al loguearse:
+
+| Scope | Endpoints |
+|---|---|
+| `read:snippets` | Todos los `GET`: `/snippets`, `/snippets/{id}`, `/snippets/{id}/tests`, `/snippets/{id}/lint`, `/snippets/{id}/download`, `/rules/linting`, `/rules/formatting`, `/users`. `POST /snippets/{id}/format` (previsualiza el formato, no guarda nada) y `POST /snippets/{id}/tests/{testId}/run` (correr un test). El WebSocket de `/execution`. |
+| `write:snippets` | Todo lo demás: `POST /snippets`, `PUT` y `DELETE /snippets/{id}`, `POST /snippets/{id}/share`, `POST /snippets/{id}/tests`, `PUT` y `DELETE /snippets/{id}/tests/{testId}`, `PUT /rules/linting` y `PUT /rules/formatting`. |
+
+Correr un test deja guardado si pasó, pero es el resultado de correr lo que ya está y lo puede hacer cualquiera que vea el snippet (también por `/execution`): por eso es lectura. La regla es por método (un `GET` es leer, el resto escribir, salvo esos dos `POST`), así un endpoint nuevo queda protegido sin tocar `SecurityConfig`.
+
+Sin token es un 401; con un token al que le falta el scope, un 403 (`insufficient_scope`). `/actuator/health` no pide nada.
+
+Spring lee los scopes del claim `scope` del token, que en Auth0 es un texto separado por espacios, y arma una authority `SCOPE_read:snippets` por cada uno. En Auth0, con RBAC apagado en la API, se le da a la UI todo scope que pida y que exista en la API; con RBAC prendido, solo los que tenga asignados el usuario (por roles o directo).
+
+## Logs
+
+En Docker (`LOG_FORMAT=ecs`) cada log es una línea de JSON en formato ECS, con el servicio (`service.name`) y el contexto como campos aparte, no metido en el texto del mensaje:
+
+- `requestId`: el id del pedido. Lo pone nginx en el header `X-Request-Id`; si no viene (llamando directo al servicio), se genera uno. Vuelve en la respuesta y se le pasa a permission-service y language-service en cada llamado, así sus logs del mismo pedido tienen el mismo id. También viaja en los mensajes de los streams: los logs del linteo o el formateo en segundo plano llevan el id del pedido que lo encoló.
+- `user`: el `sub` del access token, una vez que Spring Security lo validó. En New Relic, la transacción queda con `enduser.id`.
+- Lo propio de cada log: `snippetId`, `stream`, `testId`...
+
+Un error inesperado, o un servicio interno que falló (el 502), va en ERROR con el stack trace mientras el MDC todavía tiene el `requestId`.
+
+El contexto va en el MDC (`withLogContext`) y no en key-values de SLF4J porque el agente de New Relic reenvía el MDC (como `context.requestId`, etc.) pero no los key-values. Nunca se loguean tokens, secrets ni el código de los snippets.
+
+## Tests al actualizar un snippet (US16)
+
+En la misma transacción que el update, todos los tests del snippet vuelven a `PENDING`: el resultado que tenían era del código anterior. Una vez guardado, se corren en otro hilo (`@Async`, con el executor de Spring Boot) y el PUT responde sin esperarlos. Cada test termina `PASSED` o `FAILED`; uno que no se pudo correr queda `PENDING` y no frena a los demás. La UI consulta los tests hasta que ninguno esté `PENDING`.
+
+Si el owner actualiza dos veces seguidas, las dos corridas pueden cruzarse y la del código anterior terminar última. Para que no pise a la del nuevo, cada update tiene un id (`revision`) que, en la misma transacción, queda guardado en cada test (`pending_run`) como la corrida de la que se espera el resultado. Cada resultado se guarda con un `UPDATE` condicional: solo si el test todavía espera esa corrida. El de una corrida vieja se descarta, y lo mismo si se editó el test mientras corría (editarlo borra `pending_run`). Cada resultado se guarda en su propia transacción, así la UI ve cada test a medida que termina.
+
+## Tareas programadas
+
+Los dos workers de los streams, el barrido de pendientes, el chequeo de la versión del parser y los reportes a New Relic corren en un pool de `SCHEDULING_POOL_SIZE` hilos (4), así una tanda lenta de un worker no frena a los demás. Spring nunca corre dos vueltas de la misma tarea a la vez, y cada tarea tiene su propio estado.
+
 ## Correr en local
 
 Necesita su Postgres, asset-service (con su Azurite) y Redis. Lo más simple es levantarlos desde el repo [`infra`](https://github.com/Ingsis-2026/infra) con `docker compose up -d snippet-db asset-service redis`.
@@ -64,11 +106,16 @@ Necesita su Postgres, asset-service (con su Azurite) y Redis. Lo más simple es 
 | `DB_HOST` / `DB_PORT` / `DB_NAME` / `DB_USER` / `DB_PASSWORD` | `localhost` / `5432` / `snippet` / `snippet` / `snippet` |
 | `PERMISSION_URL` / `LANGUAGE_URL` | `http://localhost:8081` / `http://localhost:8082` |
 | `ASSET_URL` / `ASSET_CONTAINER` | `http://localhost:8083` / `snippets` |
+| `HTTP_CONNECT_TIMEOUT` / `HTTP_READ_TIMEOUT` / `LANGUAGE_READ_TIMEOUT` | `2s` / `10s` / `30s`. Cuánto se espera a abrir la conexión y a que responda permission-service, asset-service o Auth0; language-service tiene su propio tiempo de respuesta, más largo, porque corre el código antes de responder. Vencido, es una caída de la dependencia: un 502 en la API (503 en `/users`) y una postergación en los workers de los streams. El WebSocket de `/execution` no tiene timeout de respuesta. |
 | `REDIS_HOST` / `REDIS_PORT` | `localhost` / `6379` |
 | `HOSTNAME` | `snippet-service`. Es el nombre de la réplica en el consumer group; en Docker es el id del container. |
 | `AUTH0_DOMAIN` / `AUTH0_AUDIENCE` | `dev-2fvmkxju8g70kqvs.us.auth0.com` / `https://snippet-searcher/api`. El tenant de Auth0 que emite los access tokens y el identifier de esta API en ese tenant. No son secretos. |
-| `AUTH0_M2M_CLIENT_ID` / `AUTH0_M2M_CLIENT_SECRET` | Vacíos. La aplicación machine-to-machine de Auth0 con `read:users` en la Management API, para buscar con quién compartir (US7). Sin ellos, `GET /users` responde 503 y el resto anda igual. **El secret nunca se commitea.** |
+| `AUTH0_M2M_CLIENT_ID` / `AUTH0_M2M_CLIENT_SECRET` | Vacíos. La aplicación machine-to-machine de Auth0 del servicio: con `read:users` en la Management API busca con quién compartir (US7), y autorizada en la API interna pide el token con el que llama a permission-service y language-service. Sin ellos, `GET /users` responde 503 y a esos dos servicios los llama sin token (tienen que correr con `AUTH_ENABLED=false`). **El secret nunca se commitea.** |
+| `AUTH0_INTERNAL_AUDIENCE` | `https://snippet-searcher/internal`. El identifier de la API interna en Auth0, la audience que validan permission-service y language-service. |
 | `CORS_ALLOWED_ORIGINS` | `http://localhost:5173`. Origins de otros dominios que pueden llamar a la API desde el navegador, separados por comas. La UI desplegada no lo necesita: llama a `/api` en su mismo dominio. |
+| `LOG_FORMAT` | Vacío: logs en texto, para leerlos en la consola del IDE o en los tests, con el contexto entre corchetes (`[requestId=…, user=…]`). La imagen de Docker trae `ecs`: un JSON por línea (ver [Logs](#logs)). |
+| `SCHEDULING_POOL_SIZE` | `4`. Cuántos hilos tienen las tareas programadas (ver [Tareas programadas](#tareas-programadas)). |
+| `LINT_SWEEP_INTERVAL` / `LINT_SWEEP_STUCK_AFTER` | `5m` / `10m`. Cada cuánto se buscan snippets `PENDING` sin un mensaje que los vaya a lintear, y cuánto tienen que llevar así para volver a encolarlos. |
 
 ## Calidad
 

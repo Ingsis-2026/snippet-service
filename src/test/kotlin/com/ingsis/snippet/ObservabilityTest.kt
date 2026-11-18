@@ -175,16 +175,18 @@ class ObservabilityTest(
     fun `el inventario cuenta los snippets por estado y los usuarios que tienen alguno`() {
         repository.save(Snippet("Otro", "x", "printscript", "1.1", "auth0|ana", ValidityStatus.COMPLIANT))
         repository.save(Snippet("De Beto", "x", "printscript", "1.1", "auth0|beto", ValidityStatus.INVALID))
+        repository.save(Snippet("Roto", "x", "printscript", "1.1", "auth0|beto", ValidityStatus.ERROR))
 
         inventory.report()
 
         val report = telemetry.events(INVENTORY_EVENT).single()
-        assertEquals(3L, report["total"])
+        assertEquals(4L, report["total"])
         assertEquals(2L, report["owners"])
         assertEquals(1L, report["pending"])
         assertEquals(1L, report["compliant"])
         assertEquals(0L, report["notCompliant"])
         assertEquals(1L, report["invalid"])
+        assertEquals(1L, report["error"])
     }
 
     @Test

@@ -115,6 +115,7 @@ class AutomaticFormattingTest(
         assertEquals(tidy, contents.load(messySnippet.id!!))
         assertEquals(tidy, contents.load(tidySnippet.id!!))
         assertEquals(messy, contents.load(betoSnippet.id!!))
+        assertEquals(messy, contents.loadOriginal(messySnippet.id!!))
     }
 
     @Test

@@ -44,6 +44,8 @@ dependencies {
     testImplementation("org.springframework.boot:spring-boot-starter-validation-test")
     testImplementation("org.springframework.boot:spring-boot-starter-webmvc-test")
     testImplementation("org.jetbrains.kotlin:kotlin-test-junit5")
+    // Esperar lo que corre en otro hilo, como los tests que se corren al actualizar un snippet (US16).
+    testImplementation("org.awaitility:awaitility-kotlin")
     testRuntimeOnly("com.h2database:h2")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
