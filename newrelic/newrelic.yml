@@ -1,7 +1,7 @@
 # Configuración del agente de New Relic, igual a la del asset-service de la cátedra. El agente la lee de la
 # carpeta de su jar (/app/newrelic en la imagen). Lo que cambia por entorno va en variables, que pisan este archivo:
 #   NEW_RELIC_AGENT_ENABLED  true en las VMs; sin ella el agente no hace nada (docker-compose, tests, el IDE)
-#   NEW_RELIC_LICENSE_KEY    la license key (ingest) de la cuenta; va en el .env de la VM, nunca acá
+#   NEW_RELIC_LICENSE_KEY    la license key (ingest) de la cuenta; llega como el Docker secret newrelic-java-options (ver infra), nunca acá
 #   NEW_RELIC_APP_NAME       <servicio>-<entorno>, así dev y prod son aplicaciones distintas en New Relic
 #   NEW_RELIC_LABELS         por ejemplo "env:dev;stack:snippet", para filtrar en los dashboards
 common: &default_settings
